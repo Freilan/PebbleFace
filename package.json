@@ -63,13 +63,6 @@
                     "type": "raw"
                 },
                 {
-                    "file": "images/icon.png",
-                    "menuIcon": true,
-                    "name": "icon",
-                    "targetPlatforms": null,
-                    "type": "bitmap"
-                },
-                {
                     "file": "data/petal.pdc",
                     "name": "2",
                     "targetPlatforms": null,
@@ -86,6 +79,13 @@
                     "name": "4",
                     "targetPlatforms": null,
                     "type": "raw"
+                },
+                {
+                    "file": "images/icon.png",
+                    "menuIcon": true,
+                    "name": "icon",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
                 }
             ]
         },

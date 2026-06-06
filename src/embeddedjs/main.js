@@ -44,19 +44,27 @@ function petalAnchor(clockDeg) {
 }
 
 // ── Resources ─────────────────────────────────────────────────
-// Resources are numbered sequentially (1-based) in the ORDER they appear in
-// package.json's `media` array, and the menu-icon bitmap (icon.png) DOES
-// take a slot. The "name" field does NOT set the id. Resulting order:
-//   1 icon_cloudy  2 icon_pcloudy  3 icon_clear  4 icon_rain  5 icon_snow
-//   6 icon_storm   7 icon.png (menu bitmap)  8 petal  9 bee  10 face
-// Loaded defensively so a bad id degrades gracefully instead of crash-looping.
+// Resource ids depend on package.json `media` ORDER and have proven fragile:
+// a wrong/out-of-range id hard-faults and crash-loops the watch (a native
+// fault that a JS try/catch cannot trap). So rather than hardcode ids, probe
+// the known-safe id range and identify each image by its unique viewbox size:
+//   petal ~60x130, bee ~50x50, face ~130x130.
+// The six ~24px-wide weather icons live at ids 1-6 (see WX_IDS) and the menu
+// bitmap is ordered last in package.json, so nothing past id 9 is loaded.
 function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
 }
-const petalDCI = loadDCI(8);
-const beeDCI   = loadDCI(9);
-const faceDCI  = loadDCI(10);
+let petalDCI = null, beeDCI = null, faceDCI = null;
+for (let id = 1; id <= 9; id++) {
+    const dci = loadDCI(id);
+    if (!dci) continue;
+    const w = dci.width, h = dci.height;
+    if      (w >= 100 && h >= 100) faceDCI  = dci;  // face  ~130x130
+    else if (h >= 100)             petalDCI = dci;  // petal ~60x130
+    else if (w >= 40)              beeDCI   = dci;  // bee   ~50x50
+    // ~24px-wide weather icons are skipped here; drawn via WX_IDS below
+}
 
 const PETAL_PX = petalDCI ? petalDCI.width  >> 1 : 0;
 const PETAL_PY = petalDCI ? petalDCI.height      : 0;
