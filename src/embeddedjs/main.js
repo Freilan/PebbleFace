@@ -213,33 +213,26 @@ function drawScreen(event) {
     strokeText(dateStr, a.x - (w >> 1) - 5, a.y - (font.height >> 1));
 
     a = petalAnchor(60);
-    const tempStr = weather ? weather.temp + (useFahrenheit ? "\u00B0F" : "\u00B0C") : "--\u00B0";
+    const tempStr = weather ? weather.temp + "\u00B0" : "--\u00B0";
     w = render.getTextWidth(tempStr, font);
     strokeText(tempStr, a.x - (w >> 1) + 5, a.y - (font.height >> 1));
 
+    // Weather condition — drawn as an icon based on the weather data,
+    // replacing the old text label (e.g. "Cloudy"). Centered on the anchor.
     a = petalAnchor(90);
-    const condStr = weather ? weather.desc : "";
-    if (condStr) {
-        w = render.getTextWidth(condStr, font);
-        strokeText(condStr, a.x - (w >> 1), a.y - (font.height >> 1));
-    }
-
-if (condStr) {
-        const iconId = WX_IDS[condStr];
+    if (weather) {
+        const iconId = WX_IDS[weather.desc];
         if (iconId !== undefined) {
             try {
                 const icon = new Poco.PebbleDrawCommandImage(iconId);
                 render.drawDCI(icon,
-                    a.x - (icon.width >> 1),
-                    a.y + (font.height >> 1) + 3);
-                render.end();
+                    a.x - (icon.width  >> 1),
+                    a.y - (icon.height >> 1));
             } catch(e) {}
         }
     }
 
     render.end();
-
-    
 }
 
 // ── Petal drop animation ──────────────────────────────────────
