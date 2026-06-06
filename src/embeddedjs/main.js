@@ -44,20 +44,19 @@ function petalAnchor(clockDeg) {
 }
 
 // ── Resources ─────────────────────────────────────────────────
-// Draw-command (PDC) resources are numbered sequentially (1-based) in the
-// ORDER they appear in package.json's `media` array — and the menu-icon
-// bitmap (icon.png) does NOT take a slot in this sequence. The "name" field
-// does NOT set the id. Resulting order:
-//   1 icon_cloudy  2 icon_pcloudy  3 icon_clear  4 icon_rain
-//   5 icon_snow    6 icon_storm    7 petal       8 bee        9 face
+// Resources are numbered sequentially (1-based) in the ORDER they appear in
+// package.json's `media` array, and the menu-icon bitmap (icon.png) DOES
+// take a slot. The "name" field does NOT set the id. Resulting order:
+//   1 icon_cloudy  2 icon_pcloudy  3 icon_clear  4 icon_rain  5 icon_snow
+//   6 icon_storm   7 icon.png (menu bitmap)  8 petal  9 bee  10 face
 // Loaded defensively so a bad id degrades gracefully instead of crash-looping.
 function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
 }
-const petalDCI = loadDCI(7);
-const beeDCI   = loadDCI(8);
-const faceDCI  = loadDCI(9);
+const petalDCI = loadDCI(8);
+const beeDCI   = loadDCI(9);
+const faceDCI  = loadDCI(10);
 
 const PETAL_PX = petalDCI ? petalDCI.width  >> 1 : 0;
 const PETAL_PY = petalDCI ? petalDCI.height      : 0;
