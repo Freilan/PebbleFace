@@ -8,10 +8,6 @@ import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
 
-// ── Debug logging (surfaces in the CloudPebble app log) ───────
-const log = (typeof trace === "function") ? s => trace("YOSHI " + s + "\n") : () => {};
-log("wx: caps fetch=" + (typeof fetch) + " localStorage=" + (typeof localStorage));
-
 const render = new Poco(screen);
 
 // ── Font ──────────────────────────────────────────────────────
@@ -127,13 +123,11 @@ function loadCachedWeather() {
 }
 
 // Only one Location sensor instance may exist at a time ("single instance
-// only"). Do NOT close+reopen to dodge that — rapid open/close over the
-// app_message channel aborts ("output_begin failed"). Just skip if a sample
-// is already in flight.
+// only"). Skip if a sample is already in flight rather than close+reopen —
+// rapid open/close over the app_message channel aborts ("output_begin failed").
 let locating = false;
 function requestLocation() {
     if (locating) return;
-    log("wx: requestLocation");
     locating = true;
     try {
         new Location({
@@ -142,12 +136,11 @@ function requestLocation() {
                 try {
                     const s = this.sample();
                     this.close();
-                    log("wx: sample " + s.latitude + "," + s.longitude);
                     fetchWeather(s.latitude, s.longitude);
-                } catch(e) { log("wx: sample ERR " + e); }
+                } catch(e) {}
             }
         });
-    } catch(e) { locating = false; log("wx: Location ctor ERR " + e); }
+    } catch(e) { locating = false; }
 }
 
 async function fetchWeather(lat, lon) {
@@ -156,23 +149,20 @@ async function fetchWeather(lat, lon) {
         const url = "http://api.open-meteo.com/v1/forecast"
             + "?latitude=" + lat + "&longitude=" + lon
             + "&current=temperature_2m,weather_code" + u;
-        log("wx: fetch " + url);
-        const resp = await fetch(url);
-        log("wx: status " + resp.status);
-        const text = await resp.text();
-        log("wx: body[" + text.length + "] " + text.slice(0, 60));
+        // Read as text + JSON.parse: this runtime's Response.json() throws
+        // "invalid value" on valid JSON, but .text() returns the body fine.
+        const text = await (await fetch(url)).text();
         const data = JSON.parse(text);
         weather = {
             temp: Math.round(data.current.temperature_2m),
             desc: weatherDesc(data.current.weather_code)
         };
-        log("wx: got temp=" + weather.temp + " desc=" + weather.desc);
         try {
             localStorage.setItem("weather", JSON.stringify(weather));
             localStorage.setItem("weatherTime", String(Date.now()));
-        } catch(e) { log("wx: cache ERR " + e); }
+        } catch(e) {}
         drawScreen();
-    } catch(e) { log("wx: fetch ERR " + e); }
+    } catch(e) {}
 }
 
 // ── strokeText ────────────────────────────────────────────────
@@ -279,7 +269,7 @@ function drawScreen(event) {
 
     render.end();
   } catch(e) {
-    log("draw ERROR: " + e);
+    // Never let a draw error crash/reboot the watch; skip this frame.
     try { render.end(); } catch(_) {}
   }
 }
