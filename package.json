@@ -1,0 +1,102 @@
+{
+    "author": "PossumCo",
+    "dependencies": {
+        "@moddable/pebbleproxy": "^0.1.8",
+        "@rebble/clay": "^1.0.10"
+    },
+    "keywords": [
+        "pebble-app"
+    ],
+    "name": "yoshi-flower",
+    "pebble": {
+        "capabilities": [
+            "location",
+            "configurable"
+        ],
+        "displayName": "Yoshi Flower",
+        "enableMultiJS": true,
+        "messageKeys": [
+            "BackgroundColor",
+            "TextColor",
+            "TemperatureUnit",
+            "ShowDate",
+            "HourFormat",
+            "YoshiColor"
+        ],
+        "projectType": "moddable",
+        "resources": {
+            "media": [
+                {
+                    "file": "data/icon_cloudy.pdc",
+                    "name": "6",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/icon_pcloudy.pdc",
+                    "name": "7",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/icon_clear.pdc",
+                    "name": "5",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/icon_rain.pdc",
+                    "name": "8",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/icon_snow.pdc",
+                    "name": "9",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/icon_storm.pdc",
+                    "name": "10",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "images/icon.png",
+                    "menuIcon": true,
+                    "name": "icon",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                },
+                {
+                    "file": "data/petal.pdc",
+                    "name": "2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/bee.pdc",
+                    "name": "3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face.pdc",
+                    "name": "4",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                }
+            ]
+        },
+        "sdkVersion": "3",
+        "targetPlatforms": [
+            "gabbro"
+        ],
+        "uuid": "45a40590-9e1c-417b-ad42-1c9a0de8858f",
+        "watchapp": {
+            "watchface": true
+        }
+    },
+    "version": "1.0.0"
+}
