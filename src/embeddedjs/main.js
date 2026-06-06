@@ -44,12 +44,13 @@ function petalAnchor(clockDeg) {
 }
 
 // ── Resources ─────────────────────────────────────────────────
-// Resource IDs from .N suffix in .reso filenames (stable, assigned by CloudPebble):
-// petal=2, bee=3, face=4, icon_clear=5, icon_cloudy=6
-// icon_pcloudy=7, icon_rain=8, icon_snow=9, icon_storm=10
-const petalDCI = new Poco.PebbleDrawCommandImage(2);
-const beeDCI   = new Poco.PebbleDrawCommandImage(3);
-const faceDCI = new Poco.PebbleDrawCommandImage(4); 
+// Resource IDs are assigned sequentially (1-based) in the ORDER the `media`
+// array appears in package.json — the "name" field does NOT set the id.
+// Current order: 1 icon_cloudy, 2 icon_pcloudy, 3 icon_clear, 4 icon_rain,
+// 5 icon_snow, 6 icon_storm, 7 icon.png (menu), 8 petal, 9 bee, 10 face.
+const petalDCI = new Poco.PebbleDrawCommandImage(8);
+const beeDCI   = new Poco.PebbleDrawCommandImage(9);
+const faceDCI  = new Poco.PebbleDrawCommandImage(10);
 
 const PETAL_PX = petalDCI.width  >> 1;
 const PETAL_PY = petalDCI.height;
@@ -58,12 +59,12 @@ const BEE_PY   = beeDCI.height >> 1;
 
 // Weather icon resource IDs — loaded lazily at draw time
 const WX_IDS = {
-    "Clear":     5,
-    "Cloudy":    6,
-    "P. Cloudy": 7,
-    "Rain":      8,
-    "Snow":      9,
-    "Storm":     10,
+    "Clear":     3,
+    "Cloudy":    1,
+    "P. Cloudy": 2,
+    "Rain":      4,
+    "Snow":      5,
+    "Storm":     6,
 };
 
 // ── Lookup tables ─────────────────────────────────────────────
