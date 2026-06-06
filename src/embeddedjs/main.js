@@ -47,24 +47,30 @@ function petalAnchor(clockDeg) {
 // Resource ids depend on package.json `media` ORDER and have proven fragile:
 // a wrong/out-of-range id hard-faults and crash-loops the watch (a native
 // fault that a JS try/catch cannot trap). So rather than hardcode ids, probe
-// the known-safe id range and identify each image by its unique viewbox size:
+// the PDC images and identify each by its unique viewbox size:
 //   petal ~60x130, bee ~50x50, face ~130x130.
-// The six ~24px-wide weather icons live at ids 1-6 (see WX_IDS) and the menu
-// bitmap is ordered last in package.json, so nothing past id 9 is loaded.
+// Tall (~60x130) images are collected in resource order: the first is the base
+// petal, any others are the optional "current-hour" pull-off highlight frames
+// (so add petal_pull_N.pdc right AFTER petal.pdc, before the menu bitmap).
+// We scan until the first miss — that is the menu bitmap (a PNG can't load as a
+// draw-command image), which keeps us from ever touching an out-of-range id.
 function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
 }
-let petalDCI = null, beeDCI = null, faceDCI = null;
-for (let id = 1; id <= 9; id++) {
+let beeDCI = null, faceDCI = null;
+const petalFrames = [];   // [ base petal, ...pull-off highlight frames ]
+for (let id = 1; id <= 64; id++) {
     const dci = loadDCI(id);
-    if (!dci) continue;
+    if (!dci) break;       // first miss = menu bitmap; everything past it is the bitmap/MOD
     const w = dci.width, h = dci.height;
-    if      (w >= 100 && h >= 100) faceDCI  = dci;  // face  ~130x130
-    else if (h >= 100)             petalDCI = dci;  // petal ~60x130
-    else if (w >= 40)              beeDCI   = dci;  // bee   ~50x50
+    if      (w >= 100 && h >= 100) faceDCI = dci;         // face  ~130x130
+    else if (h >= 100)             petalFrames.push(dci);  // petal + pull frames ~60x130
+    else if (w >= 40)              beeDCI = dci;           // bee   ~50x50
     // ~24px-wide weather icons are skipped here; drawn via WX_IDS below
 }
+const petalDCI   = petalFrames[0] || null;   // base petal
+const pullFrames = petalFrames.slice(1);     // 0..N current-hour highlight frames
 
 const PETAL_PX = petalDCI ? petalDCI.width  >> 1 : 0;
 const PETAL_PY = petalDCI ? petalDCI.height      : 0;
@@ -98,8 +104,12 @@ try {
 } catch(e) {}
 
 // ── Petal visibility ──────────────────────────────────────────
+// pos 1 = the top (12 o'clock) petal — always present: it is the last to
+// remain and reblooms at 1:00. The other 11 fall one per hour starting at the
+// 1 o'clock petal and going clockwise, so at 1:00 the flower is full and at
+// 12:00 only the top petal is left.
 function petalVisible(pos) {
-    return currentH12 === 12 || pos > currentH12;
+    return pos === 1 || pos > currentH12;
 }
 
 // ── Weather ───────────────────────────────────────────────────
@@ -207,19 +217,36 @@ function drawScreen(event) {
     }
     render.end();
 
-    // Layer 2: petals — clone the petal ONCE per frame and rotate it
-    // incrementally (+30° per step). Cloning a fresh ~8KB copy for every
-    // one of the 12 petals exhausted the heap and rebooted the watch on
-    // the second draw (after app_message reserved ~16KB).
+    // Layer 2: petals. The "current-hour" petal (the one being pulled off this
+    // hour, pos = currentH12 + 1) is drawn from a pull-off highlight frame that
+    // advances as the hour progresses, then falls at the top of the hour. The
+    // rest reuse ONE base-petal clone, rotated to each angle (cloning a fresh
+    // ~8KB copy per petal once exhausted the heap and rebooted the watch).
     if (petalDCI) {
-        const STEP = 30 * Math.PI / 180;
-        let pd = null;
+        const STEP   = 30 * Math.PI / 180;
+        const curPos = currentH12 + 1;           // petal pulled this hour (>12 => none)
+        let pullIdx  = -1;
+        if (pullFrames.length && curPos <= 12)   // pick frame by how far into the hour
+            pullIdx = Math.min(pullFrames.length - 1,
+                               Math.floor(now.getMinutes() / 60 * pullFrames.length));
+
+        let pd = null, pdAngle = 0;
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
-            if (!pd) pd = petalDCI.clone().rotate(-(pos - 1) * STEP, PETAL_PX, PETAL_PY);
-            else     pd.rotate(STEP, PETAL_PX, PETAL_PY);
+            const ar = -(pos - 1) * STEP;
+            let img;
+            if (pos === curPos && pullIdx >= 0) {
+                // highlighted current-hour petal — its own (cloned) frame
+                img = pullFrames[pullIdx].clone().rotate(ar, PETAL_PX, PETAL_PY);
+            } else {
+                // shared base clone, rotated by the delta to this petal's angle
+                if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
+                else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
+                pdAngle = ar;
+                img = pd;
+            }
             render.begin();
-            render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
+            render.drawDCI(img, CX - PETAL_PX, CY - PETAL_PY);
             render.end();
         }
     }
