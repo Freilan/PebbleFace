@@ -205,16 +205,22 @@ function drawScreen(event) {
     render.end();
     log("draw: bg done");
 
-    // Layer 2: petals — one render pass per petal, 1 clone at a time
-    for (let pos = 12; pos >= 1; pos--) {
-        if (!petalVisible(pos)) continue;
-        const ar = -(pos - 1) * 30 * Math.PI / 180;
-        if (!petalDCI) continue;
-        log("draw: petal " + pos);
-        const pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
-        render.begin();
-        render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
-        render.end();
+    // Layer 2: petals — clone the petal ONCE per frame and rotate it
+    // incrementally (+30° per step). Cloning a fresh ~8KB copy for every
+    // one of the 12 petals exhausted the heap and rebooted the watch on
+    // the second draw (after app_message reserved ~16KB).
+    if (petalDCI) {
+        const STEP = 30 * Math.PI / 180;
+        let pd = null;
+        for (let pos = 12; pos >= 1; pos--) {
+            if (!petalVisible(pos)) continue;
+            log("draw: petal " + pos);
+            if (!pd) pd = petalDCI.clone().rotate(-(pos - 1) * STEP, PETAL_PX, PETAL_PY);
+            else     pd.rotate(STEP, PETAL_PX, PETAL_PY);
+            render.begin();
+            render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
+            render.end();
+        }
     }
     log("draw: petals done");
 
