@@ -126,30 +126,37 @@ function loadCachedWeather() {
     } catch(e) {}
 }
 
+// Only one Location sensor instance may exist at a time ("single instance
+// only"); close any prior one before opening a new sample (e.g. hourly).
+let locationSensor = null;
 function requestLocation() {
     log("wx: requestLocation");
     try {
-        new Location({
+        if (locationSensor) { try { locationSensor.close(); } catch(e) {} locationSensor = null; }
+        locationSensor = new Location({
             onSample() {
                 try {
                     const s = this.sample();
                     this.close();
+                    locationSensor = null;
                     log("wx: sample " + s.latitude + "," + s.longitude);
                     fetchWeather(s.latitude, s.longitude);
-                } catch(e) { log("wx: sample ERR " + e); }
+                } catch(e) { locationSensor = null; log("wx: sample ERR " + e); }
             }
         });
-    } catch(e) { log("wx: Location ctor ERR " + e); }
+    } catch(e) { locationSensor = null; log("wx: Location ctor ERR " + e); }
 }
 
 async function fetchWeather(lat, lon) {
     try {
         const u = useFahrenheit ? "&temperature_unit=fahrenheit" : "";
-        const url = "http://api.open-meteo.com/v1/forecast"
+        const url = "https://api.open-meteo.com/v1/forecast"
             + "?latitude=" + lat + "&longitude=" + lon
             + "&current=temperature_2m,weather_code" + u;
         log("wx: fetch " + url);
-        const data = await (await fetch(url)).json();
+        const resp = await fetch(url);
+        log("wx: status " + resp.status);
+        const data = await resp.json();
         weather = {
             temp: Math.round(data.current.temperature_2m),
             desc: weatherDesc(data.current.weather_code)
