@@ -9,12 +9,10 @@ import Timer from "timer";
 import Location from "embedded:sensor/Location";
 
 // ── Debug logging (surfaces in the CloudPebble app log) ───────
-// The last "main:"/"draw:" line printed before a reboot pinpoints the crash.
 const log = (typeof trace === "function") ? s => trace("YOSHI " + s + "\n") : () => {};
-log("main: start");
+log("wx: caps fetch=" + (typeof fetch) + " localStorage=" + (typeof localStorage));
 
 const render = new Poco(screen);
-log("main: poco ok");
 
 // ── Font ──────────────────────────────────────────────────────
 function getFont(name, size) {
@@ -23,7 +21,6 @@ function getFont(name, size) {
     return f;
 }
 const font = getFont("MarkerFelt10", 20);
-log("main: font ok");
 
 // ── Colors ────────────────────────────────────────────────────
 const C_BG    = render.makeColor( 85, 255, 170);
@@ -65,15 +62,13 @@ function loadDCI(id) {
 let petalDCI = null, beeDCI = null, faceDCI = null;
 for (let id = 1; id <= 9; id++) {
     const dci = loadDCI(id);
-    if (!dci) { log("main: probe id=" + id + " -> null"); continue; }
+    if (!dci) continue;
     const w = dci.width, h = dci.height;
-    log("main: probe id=" + id + " " + w + "x" + h);
     if      (w >= 100 && h >= 100) faceDCI  = dci;  // face  ~130x130
     else if (h >= 100)             petalDCI = dci;  // petal ~60x130
     else if (w >= 40)              beeDCI   = dci;  // bee   ~50x50
     // ~24px-wide weather icons are skipped here; drawn via WX_IDS below
 }
-log("main: probe done petal=" + !!petalDCI + " bee=" + !!beeDCI + " face=" + !!faceDCI);
 
 const PETAL_PX = petalDCI ? petalDCI.width  >> 1 : 0;
 const PETAL_PY = petalDCI ? petalDCI.height      : 0;
@@ -132,15 +127,19 @@ function loadCachedWeather() {
 }
 
 function requestLocation() {
+    log("wx: requestLocation");
     try {
         new Location({
             onSample() {
-                const s = this.sample();
-                this.close();
-                fetchWeather(s.latitude, s.longitude);
+                try {
+                    const s = this.sample();
+                    this.close();
+                    log("wx: sample " + s.latitude + "," + s.longitude);
+                    fetchWeather(s.latitude, s.longitude);
+                } catch(e) { log("wx: sample ERR " + e); }
             }
         });
-    } catch(e) {}
+    } catch(e) { log("wx: Location ctor ERR " + e); }
 }
 
 async function fetchWeather(lat, lon) {
@@ -149,15 +148,19 @@ async function fetchWeather(lat, lon) {
         const url = "http://api.open-meteo.com/v1/forecast"
             + "?latitude=" + lat + "&longitude=" + lon
             + "&current=temperature_2m,weather_code" + u;
+        log("wx: fetch " + url);
         const data = await (await fetch(url)).json();
         weather = {
             temp: Math.round(data.current.temperature_2m),
             desc: weatherDesc(data.current.weather_code)
         };
-        localStorage.setItem("weather", JSON.stringify(weather));
-        localStorage.setItem("weatherTime", String(Date.now()));
+        log("wx: got temp=" + weather.temp + " desc=" + weather.desc);
+        try {
+            localStorage.setItem("weather", JSON.stringify(weather));
+            localStorage.setItem("weatherTime", String(Date.now()));
+        } catch(e) { log("wx: cache ERR " + e); }
         drawScreen();
-    } catch(e) {}
+    } catch(e) { log("wx: fetch ERR " + e); }
 }
 
 // ── strokeText ────────────────────────────────────────────────
@@ -178,8 +181,6 @@ function drawScreen(event) {
     const now = (event && event.date) ? event.date : lastDate;
     if (event && event.date) lastDate = event.date;
   try {
-    log("draw: enter");
-
     // Layer 1: background + dots
     render.begin();
     render.fillRectangle(C_BG, 0, 0, W, H);
@@ -203,7 +204,6 @@ function drawScreen(event) {
         }
     }
     render.end();
-    log("draw: bg done");
 
     // Layer 2: petals — clone the petal ONCE per frame and rotate it
     // incrementally (+30° per step). Cloning a fresh ~8KB copy for every
@@ -214,7 +214,6 @@ function drawScreen(event) {
         let pd = null;
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
-            log("draw: petal " + pos);
             if (!pd) pd = petalDCI.clone().rotate(-(pos - 1) * STEP, PETAL_PX, PETAL_PY);
             else     pd.rotate(STEP, PETAL_PX, PETAL_PY);
             render.begin();
@@ -222,7 +221,6 @@ function drawScreen(event) {
             render.end();
         }
     }
-    log("draw: petals done");
 
     // Layer 3: face + bee + text + weather icon
     const minutes  = now.getMinutes();
@@ -232,11 +230,8 @@ function drawScreen(event) {
     const bd = beeDCI ? beeDCI.clone().rotate(Math.PI - beeAngle, BEE_PX, BEE_PY) : null;
 
     render.begin();
-    log("draw: face start");
     if (faceDCI) render.drawDCI(faceDCI, CX - (faceDCI.width >> 1), CY - (faceDCI.height >> 1));
-    log("draw: face done");
     if (bd) render.drawDCI(bd, beeX - BEE_PX, beeY - BEE_PY);
-    log("draw: bee done");
 
     let w, a;
 
@@ -271,7 +266,6 @@ function drawScreen(event) {
     }
 
     render.end();
-    log("draw: end ok");
   } catch(e) {
     log("draw ERROR: " + e);
     try { render.end(); } catch(_) {}
@@ -288,10 +282,8 @@ function dropNextPetal() {
 // ── App behavior ──────────────────────────────────────────────
 class AppBehavior extends Behavior {
     onDisplaying(application) {
-        log("main: onDisplaying");
         loadCachedWeather();
         drawScreen();
-        log("main: first draw returned");
         requestLocation();
 
         watch.addEventListener("minutechange", clock => {
