@@ -44,18 +44,25 @@ function petalAnchor(clockDeg) {
 }
 
 // ── Resources ─────────────────────────────────────────────────
-// Resource IDs are assigned sequentially (1-based) in the ORDER the `media`
-// array appears in package.json — the "name" field does NOT set the id.
-// Current order: 1 icon_cloudy, 2 icon_pcloudy, 3 icon_clear, 4 icon_rain,
-// 5 icon_snow, 6 icon_storm, 7 icon.png (menu), 8 petal, 9 bee, 10 face.
-const petalDCI = new Poco.PebbleDrawCommandImage(8);
-const beeDCI   = new Poco.PebbleDrawCommandImage(9);
-const faceDCI  = new Poco.PebbleDrawCommandImage(10);
+// Draw-command (PDC) resources are numbered sequentially (1-based) in the
+// ORDER they appear in package.json's `media` array — and the menu-icon
+// bitmap (icon.png) does NOT take a slot in this sequence. The "name" field
+// does NOT set the id. Resulting order:
+//   1 icon_cloudy  2 icon_pcloudy  3 icon_clear  4 icon_rain
+//   5 icon_snow    6 icon_storm    7 petal       8 bee        9 face
+// Loaded defensively so a bad id degrades gracefully instead of crash-looping.
+function loadDCI(id) {
+    try { return new Poco.PebbleDrawCommandImage(id); }
+    catch(e) { return null; }
+}
+const petalDCI = loadDCI(7);
+const beeDCI   = loadDCI(8);
+const faceDCI  = loadDCI(9);
 
-const PETAL_PX = petalDCI.width  >> 1;
-const PETAL_PY = petalDCI.height;
-const BEE_PX   = beeDCI.width  >> 1;
-const BEE_PY   = beeDCI.height >> 1;
+const PETAL_PX = petalDCI ? petalDCI.width  >> 1 : 0;
+const PETAL_PY = petalDCI ? petalDCI.height      : 0;
+const BEE_PX   = beeDCI   ? beeDCI.width  >> 1 : 0;
+const BEE_PY   = beeDCI   ? beeDCI.height >> 1 : 0;
 
 // Weather icon resource IDs — loaded lazily at draw time
 const WX_IDS = {
