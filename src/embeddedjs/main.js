@@ -8,8 +8,8 @@ import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
 
-// Debug logging — set to the trace() form to re-enable.
-const log = () => {};
+// Debug logging — last "YOSHI ..." line before a reboot pinpoints the crash.
+const log = (typeof trace === "function") ? s => trace("YOSHI " + s + "\n") : () => {};
 
 const render = new Poco(screen);
 
@@ -95,6 +95,7 @@ const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV
 let weather      = null;
 let lastDate     = new Date();
 let currentH12   = (lastDate.getHours() % 12) || 12;
+let tugPhase     = 0, tugTimer = null;   // drives the ~1fps current-petal pulse
 let useFahrenheit = true;
 try {
     const s = localStorage.getItem("settings");
@@ -237,13 +238,13 @@ function drawScreen(event) {
     if (petalDCI) {
         const STEP   = 30 * Math.PI / 180;
         const curPos = currentH12 + 1;           // current-hour petal (>12 => none, at 12:00)
-        // Static highlight: lift the current-hour petal a few px outward so it
-        // stands out. A per-second wobble animation isn't viable here — the
-        // per-repaint petal/bee clones accumulate faster than GC reclaims them
-        // at 1fps and the watch reboots. A still highlight redraws only on the
-        // minute tick (the proven-stable cadence), so nothing piles up. It's a
-        // draw-position offset (not a rotation), so it can't perturb the chain.
-        const LIFT = 22;                         // px the current petal juts out
+        // Highlight the current-hour petal: lift it outward and PULSE that lift
+        // (~1s/step) so it tugs. The per-repaint clones are now tiny (~3.6KB
+        // total after the PDC shrink), so 1fps cloning no longer outruns GC —
+        // and a fresh clone each frame means no rotation drift. It's a draw-
+        // position offset (not a rotation), so it never perturbs the chain.
+        const LIFTSEQ = [12, 16, 20, 24, 20, 16];   // px outward, pulsing
+        const LIFT = LIFTSEQ[tugPhase % LIFTSEQ.length];
         const ca   = (curPos - 1) * STEP;        // outward direction of that petal
         const lx   = (curPos <= 12) ? Math.round(Math.sin(ca)  * LIFT) : 0;
         const ly   = (curPos <= 12) ? Math.round(-Math.cos(ca) * LIFT) : 0;
@@ -331,6 +332,15 @@ function drawScreen(event) {
   }
 }
 
+// ── Current-petal pulse driver (~1fps) ────────────────────────
+// Now affordable: the shrunk PDCs make a repaint's clones ~3.6KB, so 1fps
+// cloning no longer outruns GC. Skips the repaint at 12 o'clock (lone petal).
+function animateTug() {
+    tugPhase++;
+    if (currentH12 < 12) drawScreen();
+    tugTimer = Timer.set(animateTug, 1000);
+}
+
 // ── App behavior ──────────────────────────────────────────────
 class AppBehavior extends Behavior {
     onDisplaying(application) {
@@ -339,6 +349,7 @@ class AppBehavior extends Behavior {
         drawScreen();
         log("main: first draw returned");
         requestLocation();
+        if (!tugTimer) tugTimer = Timer.set(animateTug, 1000);
 
         watch.addEventListener("minutechange", clock => {
             currentH12 = (clock.date.getHours() % 12) || 12;
