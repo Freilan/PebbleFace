@@ -91,8 +91,6 @@ const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV
 // ── State ─────────────────────────────────────────────────────
 let weather      = null;
 let lastDate     = new Date();
-let tugPhase     = 0;      // advances ~1/sec to drive the current-hour petal wobble
-let tugTimer     = null;
 let currentH12   = (lastDate.getHours() % 12) || 12;
 let useFahrenheit = true;
 try {
@@ -222,13 +220,16 @@ function drawScreen(event) {
     if (petalDCI) {
         const STEP   = 30 * Math.PI / 180;
         const curPos = currentH12 + 1;           // current-hour petal (>12 => none, at 12:00)
-        // Wobble: gently rock the current-hour petal to draw the eye to it,
-        // reusing the shared base-petal clone (no frame loading, no extra mem).
-        // The wobble is applied ONLY for that petal's draw and then undone, so
-        // the rotation chain feeding the other petals stays clean (otherwise
-        // the baked-in offset made later petals — incl. the top one — jitter).
-        const WOBBLE = [0, 4, 8, 4, 0, -4, -8, -4];   // degrees, ~1s per step
-        const wob = (curPos <= 12) ? WOBBLE[tugPhase % WOBBLE.length] * Math.PI / 180 : 0;
+        // Static highlight: lift the current-hour petal a few px outward so it
+        // stands out. A per-second wobble animation isn't viable here — the
+        // per-repaint petal/bee clones accumulate faster than GC reclaims them
+        // at 1fps and the watch reboots. A still highlight redraws only on the
+        // minute tick (the proven-stable cadence), so nothing piles up. It's a
+        // draw-position offset (not a rotation), so it can't perturb the chain.
+        const LIFT = 12;
+        const ca   = (curPos - 1) * STEP;        // outward direction of that petal
+        const lx   = (curPos <= 12) ? Math.round(Math.sin(ca)  * LIFT) : 0;
+        const ly   = (curPos <= 12) ? Math.round(-Math.cos(ca) * LIFT) : 0;
 
         let pd = null, pdAngle = 0;
         for (let pos = 12; pos >= 1; pos--) {
@@ -237,12 +238,11 @@ function drawScreen(event) {
             if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
             else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
             pdAngle = ar;
-            const w2 = (pos === curPos) ? wob : 0;   // wobble this petal only
-            if (w2) pd.rotate(w2, PETAL_PX, PETAL_PY);
+            const dx = (pos === curPos) ? lx : 0;   // lift the current petal only
+            const dy = (pos === curPos) ? ly : 0;
             render.begin();
-            render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
+            render.drawDCI(pd, CX - PETAL_PX + dx, CY - PETAL_PY + dy);
             render.end();
-            if (w2) pd.rotate(-w2, PETAL_PX, PETAL_PY);   // undo — keep chain clean
         }
     }
 
@@ -298,15 +298,6 @@ function drawScreen(event) {
   }
 }
 
-// ── Current-hour petal wobble ─────────────────────────────────
-// Advances the wobble ~1/sec and repaints. Skips the repaint at 12 o'clock
-// (lone top petal — nothing to highlight). Timer.set(callback, interval).
-function animateTug() {
-    tugPhase++;
-    if (currentH12 < 12) drawScreen();
-    tugTimer = Timer.set(animateTug, 1000);
-}
-
 // ── App behavior ──────────────────────────────────────────────
 class AppBehavior extends Behavior {
     onDisplaying(application) {
@@ -315,7 +306,6 @@ class AppBehavior extends Behavior {
         drawScreen();
         log("main: first draw returned");
         requestLocation();
-        if (!tugTimer) tugTimer = Timer.set(animateTug, 1000);
 
         watch.addEventListener("minutechange", clock => {
             currentH12 = (clock.date.getHours() % 12) || 12;
