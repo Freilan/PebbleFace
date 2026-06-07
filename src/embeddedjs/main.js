@@ -8,8 +8,8 @@ import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
 
-// Debug logging — last "YOSHI ..." line before a reboot pinpoints the crash.
-const log = (typeof trace === "function") ? s => trace("YOSHI " + s + "\n") : () => {};
+// Debug logging — set to the trace() form to re-enable.
+const log = () => {};
 
 const render = new Poco(screen);
 
@@ -100,6 +100,11 @@ let weather      = null;
 let lastDate     = new Date();
 let tugPhase     = 0;      // advances ~1/sec to animate the current-hour petal
 let tugTimer     = null;
+// Pull-off "tug" disabled: loading+cloning a petal frame on every repaint does
+// not fit alongside the ~16KB the weather proxy reserves for app_message — the
+// first paint works, later repaints exhaust the heap and reboot. The current-
+// hour petal falls back to the normal petal until we adopt a lighter approach.
+const TUG_ENABLED = false;
 let currentH12   = (lastDate.getHours() % 12) || 12;
 let useFahrenheit = true;
 try {
@@ -230,7 +235,7 @@ function drawScreen(event) {
         const STEP   = 30 * Math.PI / 180;
         const curPos = currentH12 + 1;           // petal pulled this hour (>12 => none)
         let pullIdx  = -1;
-        if (pullIds.length && curPos <= 12) {
+        if (TUG_ENABLED && pullIds.length && curPos <= 12) {
             const n = pullIds.length;
             if (n === 1) {
                 pullIdx = 0;
@@ -351,7 +356,7 @@ class AppBehavior extends Behavior {
         drawScreen();
         log("main: first draw returned");
         requestLocation();
-        if (pullIds.length >= 2 && !tugTimer)
+        if (TUG_ENABLED && pullIds.length >= 2 && !tugTimer)
             tugTimer = Timer.set(animateTug, 1000);
 
         watch.addEventListener("minutechange", clock => {
