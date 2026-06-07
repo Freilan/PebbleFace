@@ -191,13 +191,13 @@ function strokeText(str, x, y) {
 // no font/extra-memory cost): white backing for contrast, a black ring, a
 // white centre, and white-ed corners to round it. (x,y) = top-left, ~7x7.
 function drawDegree(x, y) {
-    render.fillRectangle(C_WHITE, x,     y,     7, 7);   // halo / backing
-    render.fillRectangle(C_BLACK, x + 1, y + 1, 5, 5);   // ring (outer)
-    render.fillRectangle(C_WHITE, x + 2, y + 2, 3, 3);   // hole
+    render.fillRectangle(C_WHITE, x,     y,     9, 9);   // halo / backing
+    render.fillRectangle(C_BLACK, x + 1, y + 1, 7, 7);   // ring (outer) — 2px thick
+    render.fillRectangle(C_WHITE, x + 3, y + 3, 3, 3);   // hole
     render.fillRectangle(C_WHITE, x + 1, y + 1, 1, 1);   // round the 4 corners
-    render.fillRectangle(C_WHITE, x + 5, y + 1, 1, 1);
-    render.fillRectangle(C_WHITE, x + 1, y + 5, 1, 1);
-    render.fillRectangle(C_WHITE, x + 5, y + 5, 1, 1);
+    render.fillRectangle(C_WHITE, x + 7, y + 1, 1, 1);
+    render.fillRectangle(C_WHITE, x + 1, y + 7, 1, 1);
+    render.fillRectangle(C_WHITE, x + 7, y + 7, 1, 1);
 }
 
 // ── Main draw ─────────────────────────────────────────────────
@@ -300,7 +300,7 @@ function drawScreen(event) {
     // Temperature number, then a hand-drawn degree ring just after it (the font
     // has no \u00B0 glyph). Center the number+degree together.
     const numStr = weather ? String(weather.temp) : "--";
-    const DEG_GAP = 2, DEG_W = 7;
+    const DEG_GAP = 2, DEG_W = 9;
     w = render.getTextWidth(numStr, font);
     const tx = a.x - ((w + DEG_GAP + DEG_W) >> 1) + 5;
     const ty = a.y - (font.height >> 1);
