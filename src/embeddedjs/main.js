@@ -226,7 +226,8 @@ function drawScreen(event) {
         // at 1fps and the watch reboots. A still highlight redraws only on the
         // minute tick (the proven-stable cadence), so nothing piles up. It's a
         // draw-position offset (not a rotation), so it can't perturb the chain.
-        const LIFT = 22;
+        const LIFT = 22;                         // px the current petal juts out
+        const TILT = 18 * Math.PI / 180;         // + a cocked angle, so it reads as distinct
         const ca   = (curPos - 1) * STEP;        // outward direction of that petal
         const lx   = (curPos <= 12) ? Math.round(Math.sin(ca)  * LIFT) : 0;
         const ly   = (curPos <= 12) ? Math.round(-Math.cos(ca) * LIFT) : 0;
@@ -238,11 +239,15 @@ function drawScreen(event) {
             if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
             else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
             pdAngle = ar;
-            const dx = (pos === curPos) ? lx : 0;   // lift the current petal only
-            const dy = (pos === curPos) ? ly : 0;
+            const isCur = (pos === curPos);
+            // current petal: cock it (TILT) and lift it (lx,ly). The tilt is a
+            // round-trip on the shared clone so it doesn't perturb later petals;
+            // it's static, so no jitter and no per-frame allocation.
+            if (isCur) pd.rotate(TILT, PETAL_PX, PETAL_PY);
             render.begin();
-            render.drawDCI(pd, CX - PETAL_PX + dx, CY - PETAL_PY + dy);
+            render.drawDCI(pd, CX - PETAL_PX + (isCur ? lx : 0), CY - PETAL_PY + (isCur ? ly : 0));
             render.end();
+            if (isCur) pd.rotate(-TILT, PETAL_PX, PETAL_PY);
         }
     }
 
