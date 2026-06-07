@@ -222,23 +222,27 @@ function drawScreen(event) {
     if (petalDCI) {
         const STEP   = 30 * Math.PI / 180;
         const curPos = currentH12 + 1;           // current-hour petal (>12 => none, at 12:00)
-        // Wobble: gently rock the current-hour petal to draw the eye to it.
-        // Reuses the shared base-petal clone (no frame loading) so it costs no
-        // extra memory — drawing a separate pull-off frame per repaint did not
-        // fit alongside the weather proxy's ~16KB app_message and rebooted.
+        // Wobble: gently rock the current-hour petal to draw the eye to it,
+        // reusing the shared base-petal clone (no frame loading, no extra mem).
+        // The wobble is applied ONLY for that petal's draw and then undone, so
+        // the rotation chain feeding the other petals stays clean (otherwise
+        // the baked-in offset made later petals — incl. the top one — jitter).
         const WOBBLE = [0, 4, 8, 4, 0, -4, -8, -4];   // degrees, ~1s per step
         const wob = (curPos <= 12) ? WOBBLE[tugPhase % WOBBLE.length] * Math.PI / 180 : 0;
 
         let pd = null, pdAngle = 0;
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
-            const ar = -(pos - 1) * STEP + (pos === curPos ? wob : 0);
+            const ar = -(pos - 1) * STEP;
             if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
             else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
             pdAngle = ar;
+            const w2 = (pos === curPos) ? wob : 0;   // wobble this petal only
+            if (w2) pd.rotate(w2, PETAL_PX, PETAL_PY);
             render.begin();
             render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
             render.end();
+            if (w2) pd.rotate(-w2, PETAL_PX, PETAL_PY);   // undo — keep chain clean
         }
     }
 
