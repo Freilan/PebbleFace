@@ -96,6 +96,8 @@ let weather      = null;
 let lastDate     = new Date();
 let petalsToDrop = 0;
 let dropTimer    = null;
+let tugPhase     = 0;      // advances ~1/sec to animate the current-hour petal
+let tugTimer     = null;
 let currentH12   = (lastDate.getHours() % 12) || 12;
 let useFahrenheit = true;
 try {
@@ -226,9 +228,16 @@ function drawScreen(event) {
         const STEP   = 30 * Math.PI / 180;
         const curPos = currentH12 + 1;           // petal pulled this hour (>12 => none)
         let pullIdx  = -1;
-        if (pullFrames.length && curPos <= 12)   // pick frame by how far into the hour
-            pullIdx = Math.min(pullFrames.length - 1,
-                               Math.floor(now.getMinutes() / 60 * pullFrames.length));
+        if (pullFrames.length && curPos <= 12) {
+            const n = pullFrames.length;
+            if (n === 1) {
+                pullIdx = 0;
+            } else {                              // ping-pong: 1-2-3-2-1-2-3...
+                const period = 2 * (n - 1);
+                const phase  = ((tugPhase % period) + period) % period;
+                pullIdx = phase < n ? phase : period - phase;
+            }
+        }
 
         let pd = null, pdAngle = 0;
         for (let pos = 12; pos >= 1; pos--) {
@@ -308,12 +317,23 @@ function dropNextPetal() {
     dropTimer = petalsToDrop > 0 ? Timer.set(420, dropNextPetal) : null;
 }
 
+// ── Current-hour petal "tug" animation ────────────────────────
+// Loops the pull-off frames 1-2-3-2-1 at ~1 fps. Only repaints when there is
+// an active highlighted petal (the lone top petal at 12 o'clock doesn't tug).
+function animateTug() {
+    tugPhase++;
+    if (currentH12 < 12) drawScreen();
+    tugTimer = Timer.set(1000, animateTug);
+}
+
 // ── App behavior ──────────────────────────────────────────────
 class AppBehavior extends Behavior {
     onDisplaying(application) {
         loadCachedWeather();
         drawScreen();
         requestLocation();
+        if (pullFrames.length >= 2 && !tugTimer)
+            tugTimer = Timer.set(1000, animateTug);
 
         watch.addEventListener("minutechange", clock => {
             const d    = clock.date;
