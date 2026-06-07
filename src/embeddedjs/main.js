@@ -251,7 +251,7 @@ function drawScreen(event) {
             const ph = ((tugPhase % period) + period) % period;
             curImg = seq[ph < n ? ph : period - ph];
         }
-        const LIFT = 10;                         // small static lift so it stands out
+        const LIFT = 0;                          // no lift — the pull frames animate from the center, like the other petals
         const ca   = (curPos - 1) * STEP;        // outward direction of that petal
         const lx   = (curPos <= 12) ? Math.round(Math.sin(ca)  * LIFT) : 0;
         const ly   = (curPos <= 12) ? Math.round(-Math.cos(ca) * LIFT) : 0;
