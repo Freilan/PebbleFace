@@ -95,8 +95,6 @@ const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV
 // ── State ─────────────────────────────────────────────────────
 let weather      = null;
 let lastDate     = new Date();
-let petalsToDrop = 0;
-let dropTimer    = null;
 let tugPhase     = 0;      // advances ~1/sec to animate the current-hour petal
 let tugTimer     = null;
 let currentH12   = (lastDate.getHours() % 12) || 12;
@@ -319,20 +317,14 @@ function drawScreen(event) {
   }
 }
 
-// ── Petal drop animation ──────────────────────────────────────
-function dropNextPetal() {
-    petalsToDrop--;
-    drawScreen();
-    dropTimer = petalsToDrop > 0 ? Timer.set(420, dropNextPetal) : null;
-}
-
 // ── Current-hour petal "tug" animation ────────────────────────
 // Loops the pull-off frames 1-2-3-2-1 at ~1 fps. Only repaints when there is
 // an active highlighted petal (the lone top petal at 12 o'clock doesn't tug).
+// NB: Timer.set(callback, interval) — callback FIRST (Moddable convention).
 function animateTug() {
     tugPhase++;
     if (currentH12 < 12) drawScreen();
-    tugTimer = Timer.set(1000, animateTug);
+    tugTimer = Timer.set(animateTug, 1000);
 }
 
 // ── App behavior ──────────────────────────────────────────────
@@ -342,24 +334,10 @@ class AppBehavior extends Behavior {
         drawScreen();
         requestLocation();
         if (pullIds.length >= 2 && !tugTimer)
-            tugTimer = Timer.set(1000, animateTug);
+            tugTimer = Timer.set(animateTug, 1000);
 
         watch.addEventListener("minutechange", clock => {
-            const d    = clock.date;
-            const h24  = d.getHours();
-            const h12  = (h24 % 12) || 12;
-            const prev = (lastDate.getHours() % 12) || 12;
-
-            if (h12 !== prev && !(h24 === 0 && lastDate.getHours() === 23)) {
-                let diff = h12 - prev;
-                if (diff < 0) diff += 12;
-                petalsToDrop = diff;
-                currentH12   = h12;
-                if (dropTimer) Timer.clear(dropTimer);
-                dropTimer = Timer.set(0, dropNextPetal);
-            } else {
-                currentH12 = h12;
-            }
+            currentH12 = (clock.date.getHours() % 12) || 12;
             drawScreen(clock);
         });
 
