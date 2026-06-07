@@ -196,14 +196,20 @@ function drawScreen(event) {
     const now = (event && event.date) ? event.date : lastDate;
     if (event && event.date) lastDate = event.date;
   try {
-    // Refresh the cached clones once a minute (resets any rotation drift and
-    // gives GC a checkpoint). Within the minute the ~1fps frames just re-rotate
-    // these in place — no per-frame allocation.
+    // Cached-clone refresh. The petal clone is re-rotated to ~11 positions every
+    // frame, so it slowly loses magnitude (the flower shrinks toward center) —
+    // re-clone it every few seconds to keep that drift imperceptible. It's the
+    // only thing that drifts: the bee is rotated by 0 within a minute (no
+    // drift), so it only needs re-cloning when its angle changes on the minute.
     const minNow = now.getMinutes();
-    if (!petalClone || minNow !== cloneMin) {
+    const minuteChanged = (minNow !== cloneMin);
+    if (minuteChanged) cloneMin = minNow;
+    if (!beeClone || minuteChanged) {
+        beeClone = beeDCI ? beeDCI.clone() : null; beeCloneAngle = 0;
+    }
+    const PETAL_RECLONE_EVERY = 8;   // tug frames (~seconds) between petal refreshes
+    if (!petalClone || minuteChanged || (tugPhase % PETAL_RECLONE_EVERY) === 0) {
         petalClone = petalDCI ? petalDCI.clone() : null; petalCloneAngle = 0;
-        beeClone   = beeDCI   ? beeDCI.clone()   : null; beeCloneAngle   = 0;
-        cloneMin = minNow;
     }
 
     // Layer 1: background + dots
