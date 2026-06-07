@@ -11,7 +11,7 @@
                 "source": "./assets/MarkerFelt10",
                 "size": 20,
                 "monochrome": true,
-                "blocks": ["Basic Latin"]
+                "characters": "ABCDEFGHIJLMNOPRSTUVWY0123456789 -°"
             }
         ]
     }
