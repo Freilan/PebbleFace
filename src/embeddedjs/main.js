@@ -58,14 +58,17 @@ function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
 }
-let beeDCI = null, faceDCI = null, petalDCI = null;
+let beeDCI = null, faceDCI = null, petalDCI = null, petalCurDCI = null;
 for (let id = 1; id <= 64; id++) {
     const dci = loadDCI(id);
     if (!dci) break;       // first miss = menu bitmap; everything past it is the bitmap/MOD
     const w = dci.width, h = dci.height;
-    if      (w >= 100 && h >= 100) faceDCI = dci;          // face ~130x130
-    else if (h >= 100) { if (!petalDCI) petalDCI = dci; }  // first tall = base petal
-    else if (w >= 40)              beeDCI = dci;           // bee ~50x50
+    if      (w >= 100 && h >= 100) faceDCI = dci;     // face ~130x130
+    else if (h >= 100) {                              // tall: base petal (60w) or current (50w)
+        if (w >= 55) petalDCI    = dci;              //   ~60 wide = base petal
+        else         petalCurDCI = dci;              //   ~50 wide = current-hour petal
+    }
+    else if (w >= 40)              beeDCI = dci;      // bee ~50x50
     // ~24px-wide weather icons are skipped here; drawn via WX_IDS below
 }
 
@@ -227,7 +230,6 @@ function drawScreen(event) {
         // minute tick (the proven-stable cadence), so nothing piles up. It's a
         // draw-position offset (not a rotation), so it can't perturb the chain.
         const LIFT = 22;                         // px the current petal juts out
-        const TILT = 18 * Math.PI / 180;         // + a cocked angle, so it reads as distinct
         const ca   = (curPos - 1) * STEP;        // outward direction of that petal
         const lx   = (curPos <= 12) ? Math.round(Math.sin(ca)  * LIFT) : 0;
         const ly   = (curPos <= 12) ? Math.round(-Math.cos(ca) * LIFT) : 0;
@@ -236,18 +238,24 @@ function drawScreen(event) {
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
             const ar = -(pos - 1) * STEP;
+            if (pos === curPos && petalCurDCI) {
+                // current-hour petal: its own distinct image, centered on its
+                // own width (50 vs 60) and lifted out. Separate transient clone.
+                const px = petalCurDCI.width >> 1, py = petalCurDCI.height;
+                const cur = petalCurDCI.clone().rotate(ar, px, py);
+                render.begin();
+                render.drawDCI(cur, CX - px + lx, CY - py + ly);
+                render.end();
+                continue;
+            }
+            // base petal for the rest (one shared clone, rotated by delta)
             if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
             else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
             pdAngle = ar;
-            const isCur = (pos === curPos);
-            // current petal: cock it (TILT) and lift it (lx,ly). The tilt is a
-            // round-trip on the shared clone so it doesn't perturb later petals;
-            // it's static, so no jitter and no per-frame allocation.
-            if (isCur) pd.rotate(TILT, PETAL_PX, PETAL_PY);
+            const isCur = (pos === curPos);   // (only if petalCurDCI is missing)
             render.begin();
             render.drawDCI(pd, CX - PETAL_PX + (isCur ? lx : 0), CY - PETAL_PY + (isCur ? ly : 0));
             render.end();
-            if (isCur) pd.rotate(-TILT, PETAL_PX, PETAL_PY);
         }
     }
 
