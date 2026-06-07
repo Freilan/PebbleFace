@@ -8,6 +8,9 @@ import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
 
+// Debug logging — last "YOSHI ..." line before a reboot pinpoints the crash.
+const log = (typeof trace === "function") ? s => trace("YOSHI " + s + "\n") : () => {};
+
 const render = new Poco(screen);
 
 // ── Font ──────────────────────────────────────────────────────
@@ -238,6 +241,7 @@ function drawScreen(event) {
             }
         }
 
+        log("draw: enter h=" + currentH12 + " phase=" + tugPhase + " curPos=" + curPos + " pullIdx=" + pullIdx);
         let pd = null, pdAngle = 0;
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
@@ -246,16 +250,22 @@ function drawScreen(event) {
                 // highlighted current-hour petal: load its frame on demand
                 // (frames are large; not kept resident) and center on its own
                 // size, since pull frames may be narrower than the 60px petal.
+                log("tug: load id=" + pullIds[pullIdx]);
                 const src = loadDCI(pullIds[pullIdx]);
+                log("tug: loaded=" + !!src);
                 if (src) {
                     const px = src.width >> 1, py = src.height;
                     // clone() to a mutable RAM copy before rotate() — a
                     // resource-backed image can't be rotated in place (this is
                     // why the base petal clones too).
-                    const frame = src.clone().rotate(ar, px, py);
+                    const frame = src.clone();
+                    log("tug: cloned " + frame.width + "x" + frame.height);
+                    frame.rotate(ar, px, py);
+                    log("tug: rotated");
                     render.begin();
                     render.drawDCI(frame, CX - px, CY - py);
                     render.end();
+                    log("tug: drawn");
                     continue;
                 }
                 // fall through to the normal petal if the frame failed to load
@@ -268,6 +278,7 @@ function drawScreen(event) {
             render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
             render.end();
         }
+        log("draw: petals done");
     }
 
     // Layer 3: face + bee + text + weather icon
@@ -314,7 +325,9 @@ function drawScreen(event) {
     }
 
     render.end();
+    log("draw: end ok");
   } catch(e) {
+    log("draw ERROR: " + e);
     // Never let a draw error crash/reboot the watch; skip this frame.
     try { render.end(); } catch(_) {}
   }
@@ -333,8 +346,10 @@ function animateTug() {
 // ── App behavior ──────────────────────────────────────────────
 class AppBehavior extends Behavior {
     onDisplaying(application) {
+        log("main: onDisplaying");
         loadCachedWeather();
         drawScreen();
+        log("main: first draw returned");
         requestLocation();
         if (pullIds.length >= 2 && !tugTimer)
             tugTimer = Timer.set(animateTug, 1000);
