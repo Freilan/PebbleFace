@@ -100,6 +100,7 @@ let beeClone   = null, beeCloneAngle   = 0;
 let cloneMin   = -1;
 let wxIcon     = null, wxIconDesc = "";   // cached weather icon (reload on change)
 let tugPhase   = 0, tugTimer = null;      // drives the ~1fps pulse
+let recloneCountdown = 0;                  // draws until the next petal re-clone
 let useFahrenheit = true;
 try {
     const s = localStorage.getItem("settings");
@@ -207,10 +208,15 @@ function drawScreen(event) {
     if (!beeClone || minuteChanged) {
         beeClone = beeDCI ? beeDCI.clone() : null; beeCloneAngle = 0;
     }
-    const PETAL_RECLONE_EVERY = 8;   // tug frames (~seconds) between petal refreshes
-    if (!petalClone || minuteChanged || (tugPhase % PETAL_RECLONE_EVERY) === 0) {
+    // Re-clone the petal every ~8 DRAWS (countdown), NOT whenever tugPhase is a
+    // multiple of 8 — the latter double-cloned on the rapid startup draws (both
+    // at tugPhase 0) and, with app_message's 16KB landing between them, hit
+    // "memory full". One re-clone at startup, then ~every 8s; reuses in between.
+    if (!petalClone || minuteChanged || recloneCountdown <= 0) {
         petalClone = petalDCI ? petalDCI.clone() : null; petalCloneAngle = 0;
+        recloneCountdown = 8;
     }
+    recloneCountdown--;
 
     // Layer 1: background + dots
     render.begin();
@@ -248,7 +254,7 @@ function drawScreen(event) {
         // steps) to draw the eye. It's a draw-position offset (translation),
         // NOT a rotation, so it never perturbs the rotation chain. The clone is
         // reused (re-rotated in place), so no per-frame allocation.
-        const LIFTSEQ = [0, 5, 10, 14, 10, 5];   // px outward, ~1s per step
+        const LIFTSEQ = [10, 14, 18, 22, 18, 14];   // always lifted + pulsing, ~1s/step
         const lift = (curPos <= 12) ? LIFTSEQ[tugPhase % LIFTSEQ.length] : 0;
         const ca   = (curPos - 1) * STEP;        // outward direction of that petal
         const lx   = Math.round(Math.sin(ca)  * lift);
