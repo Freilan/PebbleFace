@@ -186,6 +186,20 @@ function strokeText(str, x, y) {
     render.drawText(str, font, C_BLACK, x,   y  );
 }
 
+// ── Degree sign ───────────────────────────────────────────────
+// MarkerFelt has no ° glyph, so draw a small ring with fillRectangle (cheap,
+// no font/extra-memory cost): white backing for contrast, a black ring, a
+// white centre, and white-ed corners to round it. (x,y) = top-left, ~7x7.
+function drawDegree(x, y) {
+    render.fillRectangle(C_WHITE, x,     y,     7, 7);   // halo / backing
+    render.fillRectangle(C_BLACK, x + 1, y + 1, 5, 5);   // ring (outer)
+    render.fillRectangle(C_WHITE, x + 2, y + 2, 3, 3);   // hole
+    render.fillRectangle(C_WHITE, x + 1, y + 1, 1, 1);   // round the 4 corners
+    render.fillRectangle(C_WHITE, x + 5, y + 1, 1, 1);
+    render.fillRectangle(C_WHITE, x + 1, y + 5, 1, 1);
+    render.fillRectangle(C_WHITE, x + 5, y + 5, 1, 1);
+}
+
 // ── Main draw ─────────────────────────────────────────────────
 function drawScreen(event) {
     const now = (event && event.date) ? event.date : lastDate;
@@ -283,9 +297,15 @@ function drawScreen(event) {
     strokeText(dateStr, a.x - (w >> 1) - 5, a.y - (font.height >> 1));
 
     a = petalAnchor(60);
-    const tempStr = weather ? weather.temp + "\u00B0" : "--\u00B0";
-    w = render.getTextWidth(tempStr, font);
-    strokeText(tempStr, a.x - (w >> 1) + 5, a.y - (font.height >> 1));
+    // Temperature number, then a hand-drawn degree ring just after it (the font
+    // has no \u00B0 glyph). Center the number+degree together.
+    const numStr = weather ? String(weather.temp) : "--";
+    const DEG_GAP = 2, DEG_W = 7;
+    w = render.getTextWidth(numStr, font);
+    const tx = a.x - ((w + DEG_GAP + DEG_W) >> 1) + 5;
+    const ty = a.y - (font.height >> 1);
+    strokeText(numStr, tx, ty);
+    drawDegree(tx + w + DEG_GAP, ty + 1);   // ty+1 nudges it to the digits' top
 
     // Weather condition — drawn as an icon based on the weather data,
     // replacing the old text label (e.g. "Cloudy"). Centered on the anchor.
