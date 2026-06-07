@@ -69,6 +69,24 @@
                     "type": "raw"
                 },
                 {
+                    "file": "data/petal_pull_1.pdc",
+                    "name": "11",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/petal_pull_2.pdc",
+                    "name": "12",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/petal_pull_3.pdc",
+                    "name": "13",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
                     "file": "data/bee.pdc",
                     "name": "3",
                     "targetPlatforms": null,
