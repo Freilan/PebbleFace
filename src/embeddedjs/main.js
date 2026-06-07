@@ -246,10 +246,13 @@ function drawScreen(event) {
                 // highlighted current-hour petal: load its frame on demand
                 // (frames are large; not kept resident) and center on its own
                 // size, since pull frames may be narrower than the 60px petal.
-                const frame = loadDCI(pullIds[pullIdx]);
-                if (frame) {
-                    const px = frame.width >> 1, py = frame.height;
-                    frame.rotate(ar, px, py);
+                const src = loadDCI(pullIds[pullIdx]);
+                if (src) {
+                    const px = src.width >> 1, py = src.height;
+                    // clone() to a mutable RAM copy before rotate() — a
+                    // resource-backed image can't be rotated in place (this is
+                    // why the base petal clones too).
+                    const frame = src.clone().rotate(ar, px, py);
                     render.begin();
                     render.drawDCI(frame, CX - px, CY - py);
                     render.end();
