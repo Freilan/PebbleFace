@@ -69,8 +69,14 @@
                     "type": "raw"
                 },
                 {
-                    "file": "data/petal-current.pdc",
-                    "name": "14",
+                    "file": "data/petal_pull_2.pdc",
+                    "name": "12",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/petal_pull_3.pdc",
+                    "name": "13",
                     "targetPlatforms": null,
                     "type": "raw"
                 },

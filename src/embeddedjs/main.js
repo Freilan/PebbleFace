@@ -59,15 +59,16 @@ function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
 }
-let beeDCI = null, faceDCI = null, petalDCI = null, petalCurDCI = null;
+let beeDCI = null, faceDCI = null, petalDCI = null;
+const pullFrames = [];   // current-hour "pull-off" frames (50w), in load order
 for (let id = 1; id <= 64; id++) {
     const dci = loadDCI(id);
     if (!dci) break;       // first miss = menu bitmap; everything past it is the bitmap/MOD
     const w = dci.width, h = dci.height;
     if      (w >= 100 && h >= 100) faceDCI = dci;     // face ~130x130
-    else if (h >= 100) {                              // tall: base petal (60w) or current (50w)
-        if (w >= 55) petalDCI    = dci;              //   ~60 wide = base petal
-        else         petalCurDCI = dci;              //   ~50 wide = current-hour petal
+    else if (h >= 100) {                              // tall petals
+        if (w >= 55) petalDCI = dci;                 //   ~60 wide = base petal (also pull frame 1)
+        else         pullFrames.push(dci);           //   ~50 wide = pull-off frames (animation)
     }
     else if (w >= 40)              beeDCI = dci;      // bee ~50x50
     // ~24px-wide weather icons are skipped here; drawn via WX_IDS below
@@ -239,13 +240,18 @@ function drawScreen(event) {
     if (petalDCI) {
         const STEP   = 30 * Math.PI / 180;
         const curPos = currentH12 + 1;           // current-hour petal (>12 => none, at 12:00)
-        // Highlight the current-hour petal: lift it outward and PULSE that lift
-        // (~1s/step) so it tugs. The per-repaint clones are now tiny (~3.6KB
-        // total after the PDC shrink), so 1fps cloning no longer outruns GC —
-        // and a fresh clone each frame means no rotation drift. It's a draw-
-        // position offset (not a rotation), so it never perturbs the chain.
-        const LIFTSEQ = [12, 16, 20, 24, 20, 16];   // px outward, pulsing
-        const LIFT = LIFTSEQ[tugPhase % LIFTSEQ.length];
+        // Current-hour petal plays the pull-off SEQUENCE: frame 1 is the resting
+        // petal (base), then the pull frames, ping-ponged ~1/sec (base -> pull2
+        // -> pull3 -> pull2 -> base). Clones are tiny now (~2KB each), so 1fps
+        // cloning is fine; a small static lift keeps it distinct even at rest.
+        const seq = pullFrames.length ? [petalDCI].concat(pullFrames) : [petalDCI];
+        let curImg = petalDCI;
+        if (curPos <= 12 && seq.length > 1) {
+            const n = seq.length, period = 2 * (n - 1);
+            const ph = ((tugPhase % period) + period) % period;
+            curImg = seq[ph < n ? ph : period - ph];
+        }
+        const LIFT = 10;                         // small static lift so it stands out
         const ca   = (curPos - 1) * STEP;        // outward direction of that petal
         const lx   = (curPos <= 12) ? Math.round(Math.sin(ca)  * LIFT) : 0;
         const ly   = (curPos <= 12) ? Math.round(-Math.cos(ca) * LIFT) : 0;
@@ -254,11 +260,11 @@ function drawScreen(event) {
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
             const ar = -(pos - 1) * STEP;
-            if (pos === curPos && petalCurDCI) {
-                // current-hour petal: its own distinct image, centered on its
-                // own width (50 vs 60) and lifted out. Separate transient clone.
-                const px = petalCurDCI.width >> 1, py = petalCurDCI.height;
-                const cur = petalCurDCI.clone().rotate(ar, px, py);
+            if (pos === curPos) {
+                // current-hour petal: this frame of the sequence, centered on
+                // its own width (frames may be 50w vs the 60w base), lifted out.
+                const px = curImg.width >> 1, py = curImg.height;
+                const cur = curImg.clone().rotate(ar, px, py);
                 render.begin();
                 render.drawDCI(cur, CX - px + lx, CY - py + ly);
                 render.end();
@@ -268,9 +274,8 @@ function drawScreen(event) {
             if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
             else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
             pdAngle = ar;
-            const isCur = (pos === curPos);   // (only if petalCurDCI is missing)
             render.begin();
-            render.drawDCI(pd, CX - PETAL_PX + (isCur ? lx : 0), CY - PETAL_PY + (isCur ? ly : 0));
+            render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
             render.end();
         }
     }
