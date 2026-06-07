@@ -8,10 +8,6 @@ import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
 
-// Debug logging — no-op for release. Restore the trace() form to debug:
-//   const log = (typeof trace === "function") ? s => trace("YOSHI " + s + "\n") : () => {};
-const log = () => {};
-
 const render = new Poco(screen);
 
 // ── Font ──────────────────────────────────────────────────────
@@ -232,18 +228,16 @@ function drawScreen(event) {
     }
     render.end();
 
-    // Layer 2: petals. The "current-hour" petal (the one being pulled off this
-    // hour, pos = currentH12 + 1) is drawn from a pull-off highlight frame that
-    // advances as the hour progresses, then falls at the top of the hour. The
-    // rest reuse ONE base-petal clone, rotated to each angle (cloning a fresh
-    // ~8KB copy per petal once exhausted the heap and rebooted the watch).
+    // Layer 2: petals. The current-hour petal (pos = currentH12 + 1) animates
+    // the pull-off sequence; the rest reuse ONE base-petal clone, rotated to
+    // each angle (re-cloning per petal would churn too much memory at 1fps).
     if (petalDCI) {
         const STEP   = 30 * Math.PI / 180;
         const curPos = currentH12 + 1;           // current-hour petal (>12 => none, at 12:00)
         // Current-hour petal plays the pull-off SEQUENCE: frame 1 is the resting
         // petal (base), then the pull frames, ping-ponged ~1/sec (base -> pull2
-        // -> pull3 -> pull2 -> base). Clones are tiny now (~2KB each), so 1fps
-        // cloning is fine; a small static lift keeps it distinct even at rest.
+        // -> pull3 -> pull2 -> base). Clones are tiny (~2KB), so 1fps cloning is
+        // fine. LIFT is 0 — the pull frames are drawn to originate at the center.
         const seq = pullFrames.length ? [petalDCI].concat(pullFrames) : [petalDCI];
         let curImg = petalDCI;
         if (curPos <= 12 && seq.length > 1) {
@@ -330,9 +324,7 @@ function drawScreen(event) {
     }
 
     render.end();
-    log("draw: end ok");
   } catch(e) {
-    log("draw ERROR: " + e);
     // Never let a draw error crash/reboot the watch; skip this frame.
     try { render.end(); } catch(_) {}
   }
@@ -350,10 +342,8 @@ function animateTug() {
 // ── App behavior ──────────────────────────────────────────────
 class AppBehavior extends Behavior {
     onDisplaying(application) {
-        log("main: onDisplaying");
         loadCachedWeather();
         drawScreen();
-        log("main: first draw returned");
         requestLocation();
         if (!tugTimer) tugTimer = Timer.set(animateTug, 1000);
 
