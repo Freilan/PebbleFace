@@ -8,8 +8,9 @@ import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
 
-// Debug logging — last "YOSHI ..." line before a reboot pinpoints the crash.
-const log = (typeof trace === "function") ? s => trace("YOSHI " + s + "\n") : () => {};
+// Debug logging — no-op for release. Restore the trace() form to debug:
+//   const log = (typeof trace === "function") ? s => trace("YOSHI " + s + "\n") : () => {};
+const log = () => {};
 
 const render = new Poco(screen);
 
