@@ -8,8 +8,8 @@ import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
 
-// Debug logging — set to the trace() form to re-enable.
-const log = () => {};
+// Debug logging — last "YOSHI ..." line before a reboot pinpoints the crash.
+const log = (typeof trace === "function") ? s => trace("YOSHI " + s + "\n") : () => {};
 
 const render = new Poco(screen);
 
@@ -92,6 +92,14 @@ const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV
 let weather      = null;
 let lastDate     = new Date();
 let currentH12   = (lastDate.getHours() % 12) || 12;
+// Cached clones: re-rotated IN PLACE each frame instead of re-cloned, so an
+// animated (~1fps) redraw allocates almost nothing and can't outrun the GC.
+// Refreshed once a minute to bound any rotation round-off drift.
+let petalClone = null, petalCloneAngle = 0;
+let beeClone   = null, beeCloneAngle   = 0;
+let cloneMin   = -1;
+let wxIcon     = null, wxIconDesc = "";   // cached weather icon (reload on change)
+let tugPhase   = 0, tugTimer = null;      // drives the ~1fps pulse
 let useFahrenheit = true;
 try {
     const s = localStorage.getItem("settings");
@@ -188,6 +196,16 @@ function drawScreen(event) {
     const now = (event && event.date) ? event.date : lastDate;
     if (event && event.date) lastDate = event.date;
   try {
+    // Refresh the cached clones once a minute (resets any rotation drift and
+    // gives GC a checkpoint). Within the minute the ~1fps frames just re-rotate
+    // these in place — no per-frame allocation.
+    const minNow = now.getMinutes();
+    if (!petalClone || minNow !== cloneMin) {
+        petalClone = petalDCI ? petalDCI.clone() : null; petalCloneAngle = 0;
+        beeClone   = beeDCI   ? beeDCI.clone()   : null; beeCloneAngle   = 0;
+        cloneMin = minNow;
+    }
+
     // Layer 1: background + dots
     render.begin();
     render.fillRectangle(C_BG, 0, 0, W, H);
@@ -217,33 +235,32 @@ function drawScreen(event) {
     // advances as the hour progresses, then falls at the top of the hour. The
     // rest reuse ONE base-petal clone, rotated to each angle (cloning a fresh
     // ~8KB copy per petal once exhausted the heap and rebooted the watch).
-    if (petalDCI) {
+    if (petalClone) {
         const STEP   = 30 * Math.PI / 180;
         const curPos = currentH12 + 1;           // current-hour petal (>12 => none, at 12:00)
-        // Static highlight: lift the current-hour petal a few px outward so it
-        // stands out. A per-second wobble animation isn't viable here — the
-        // per-repaint petal/bee clones accumulate faster than GC reclaims them
-        // at 1fps and the watch reboots. A still highlight redraws only on the
-        // minute tick (the proven-stable cadence), so nothing piles up. It's a
-        // draw-position offset (not a rotation), so it can't perturb the chain.
-        const LIFT = 12;
+        // Pulsing "tug": the current-hour petal slides outward and back (~1s
+        // steps) to draw the eye. It's a draw-position offset (translation),
+        // NOT a rotation, so it never perturbs the rotation chain. The clone is
+        // reused (re-rotated in place), so no per-frame allocation.
+        const LIFTSEQ = [0, 5, 10, 14, 10, 5];   // px outward, ~1s per step
+        const lift = (curPos <= 12) ? LIFTSEQ[tugPhase % LIFTSEQ.length] : 0;
         const ca   = (curPos - 1) * STEP;        // outward direction of that petal
-        const lx   = (curPos <= 12) ? Math.round(Math.sin(ca)  * LIFT) : 0;
-        const ly   = (curPos <= 12) ? Math.round(-Math.cos(ca) * LIFT) : 0;
+        const lx   = Math.round(Math.sin(ca)  * lift);
+        const ly   = Math.round(-Math.cos(ca) * lift);
 
-        let pd = null, pdAngle = 0;
+        let ang = petalCloneAngle;
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
             const ar = -(pos - 1) * STEP;
-            if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
-            else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
-            pdAngle = ar;
-            const dx = (pos === curPos) ? lx : 0;   // lift the current petal only
+            petalClone.rotate(ar - ang, PETAL_PX, PETAL_PY);   // in place, no alloc
+            ang = ar;
+            const dx = (pos === curPos) ? lx : 0;   // tug the current petal only
             const dy = (pos === curPos) ? ly : 0;
             render.begin();
-            render.drawDCI(pd, CX - PETAL_PX + dx, CY - PETAL_PY + dy);
+            render.drawDCI(petalClone, CX - PETAL_PX + dx, CY - PETAL_PY + dy);
             render.end();
         }
+        petalCloneAngle = ang;
     }
 
     // Layer 3: face + bee + text + weather icon
@@ -251,11 +268,15 @@ function drawScreen(event) {
     const beeAngle = (minutes / 60) * TWO_PI;
     const beeX     = Math.round(CX + BEE_R * Math.sin(beeAngle));
     const beeY     = Math.round(CY - BEE_R * Math.cos(beeAngle));
-    const bd = beeDCI ? beeDCI.clone().rotate(Math.PI - beeAngle, BEE_PX, BEE_PY) : null;
+    if (beeClone) {                              // re-rotate cached clone in place
+        const beeTarget = Math.PI - beeAngle;    // (delta is 0 within a minute)
+        beeClone.rotate(beeTarget - beeCloneAngle, BEE_PX, BEE_PY);
+        beeCloneAngle = beeTarget;
+    }
 
     render.begin();
     if (faceDCI) render.drawDCI(faceDCI, CX - (faceDCI.width >> 1), CY - (faceDCI.height >> 1));
-    if (bd) render.drawDCI(bd, beeX - BEE_PX, beeY - BEE_PY);
+    if (beeClone) render.drawDCI(beeClone, beeX - BEE_PX, beeY - BEE_PY);
 
     let w, a;
 
@@ -278,15 +299,15 @@ function drawScreen(event) {
     // replacing the old text label (e.g. "Cloudy"). Centered on the anchor.
     a = petalAnchor(90);
     if (weather) {
-        const iconId = WX_IDS[weather.desc];
-        if (iconId !== undefined) {
-            try {
-                const icon = new Poco.PebbleDrawCommandImage(iconId);
-                render.drawDCI(icon,
-                    a.x - (icon.width  >> 1),
-                    a.y - (icon.height >> 1));
-            } catch(e) {}
+        if (weather.desc !== wxIconDesc) {       // (re)load the icon only on change
+            wxIconDesc = weather.desc;
+            wxIcon = null;
+            const iconId = WX_IDS[weather.desc];
+            if (iconId !== undefined) {
+                try { wxIcon = new Poco.PebbleDrawCommandImage(iconId); } catch(e) {}
+            }
         }
+        if (wxIcon) render.drawDCI(wxIcon, a.x - (wxIcon.width >> 1), a.y - (wxIcon.height >> 1));
     }
 
     render.end();
@@ -298,6 +319,15 @@ function drawScreen(event) {
   }
 }
 
+// ── ~1fps pulse driver for the current-hour petal tug ─────────
+// Reuses cached clones (no per-frame allocation), so the repaints don't
+// outrun GC. Skips the repaint at 12 o'clock (nothing to tug there).
+function animateTug() {
+    tugPhase++;
+    if (currentH12 < 12) drawScreen();
+    tugTimer = Timer.set(animateTug, 1000);
+}
+
 // ── App behavior ──────────────────────────────────────────────
 class AppBehavior extends Behavior {
     onDisplaying(application) {
@@ -306,6 +336,7 @@ class AppBehavior extends Behavior {
         drawScreen();
         log("main: first draw returned");
         requestLocation();
+        if (!tugTimer) tugTimer = Timer.set(animateTug, 1000);
 
         watch.addEventListener("minutechange", clock => {
             currentH12 = (clock.date.getHours() % 12) || 12;
