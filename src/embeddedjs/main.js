@@ -58,19 +58,20 @@ function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
 }
-let beeDCI = null, faceDCI = null;
-const petalFrames = [];   // [ base petal, ...pull-off highlight frames ]
+let beeDCI = null, faceDCI = null, petalDCI = null;
+const pullIds = [];   // resource ids of the current-hour "pull-off" frames
 for (let id = 1; id <= 64; id++) {
     const dci = loadDCI(id);
     if (!dci) break;       // first miss = menu bitmap; everything past it is the bitmap/MOD
     const w = dci.width, h = dci.height;
-    if      (w >= 100 && h >= 100) faceDCI = dci;         // face  ~130x130
-    else if (h >= 100)             petalFrames.push(dci);  // petal + pull frames ~60x130
-    else if (w >= 40)              beeDCI = dci;           // bee   ~50x50
+    if      (w >= 100 && h >= 100) faceDCI = dci;     // face ~130x130
+    else if (h >= 100) {                              // tall (~?x130): petal or pull frame
+        if (!petalDCI) petalDCI = dci;               //   first tall = base petal (kept resident)
+        else           pullIds.push(id);             //   rest = pull frames (loaded on demand)
+    }
+    else if (w >= 40)              beeDCI = dci;      // bee ~50x50
     // ~24px-wide weather icons are skipped here; drawn via WX_IDS below
 }
-const petalDCI   = petalFrames[0] || null;   // base petal
-const pullFrames = petalFrames.slice(1);     // 0..N current-hour highlight frames
 
 const PETAL_PX = petalDCI ? petalDCI.width  >> 1 : 0;
 const PETAL_PY = petalDCI ? petalDCI.height      : 0;
@@ -228,8 +229,8 @@ function drawScreen(event) {
         const STEP   = 30 * Math.PI / 180;
         const curPos = currentH12 + 1;           // petal pulled this hour (>12 => none)
         let pullIdx  = -1;
-        if (pullFrames.length && curPos <= 12) {
-            const n = pullFrames.length;
+        if (pullIds.length && curPos <= 12) {
+            const n = pullIds.length;
             if (n === 1) {
                 pullIdx = 0;
             } else {                              // ping-pong: 1-2-3-2-1-2-3...
@@ -243,19 +244,27 @@ function drawScreen(event) {
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
             const ar = -(pos - 1) * STEP;
-            let img;
             if (pos === curPos && pullIdx >= 0) {
-                // highlighted current-hour petal — its own (cloned) frame
-                img = pullFrames[pullIdx].clone().rotate(ar, PETAL_PX, PETAL_PY);
-            } else {
-                // shared base clone, rotated by the delta to this petal's angle
-                if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
-                else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
-                pdAngle = ar;
-                img = pd;
+                // highlighted current-hour petal: load its frame on demand
+                // (frames are large; not kept resident) and center on its own
+                // size, since pull frames may be narrower than the 60px petal.
+                const frame = loadDCI(pullIds[pullIdx]);
+                if (frame) {
+                    const px = frame.width >> 1, py = frame.height;
+                    frame.rotate(ar, px, py);
+                    render.begin();
+                    render.drawDCI(frame, CX - px, CY - py);
+                    render.end();
+                    continue;
+                }
+                // fall through to the normal petal if the frame failed to load
             }
+            // normal petal: reuse one base clone, rotated by the delta to angle
+            if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
+            else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
+            pdAngle = ar;
             render.begin();
-            render.drawDCI(img, CX - PETAL_PX, CY - PETAL_PY);
+            render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
             render.end();
         }
     }
@@ -332,7 +341,7 @@ class AppBehavior extends Behavior {
         loadCachedWeather();
         drawScreen();
         requestLocation();
-        if (pullFrames.length >= 2 && !tugTimer)
+        if (pullIds.length >= 2 && !tugTimer)
             tugTimer = Timer.set(1000, animateTug);
 
         watch.addEventListener("minutechange", clock => {
