@@ -51,10 +51,7 @@ function petalAnchor(clockDeg) {
 // a wrong/out-of-range id hard-faults and crash-loops the watch (a native
 // fault that a JS try/catch cannot trap). So rather than hardcode ids, probe
 // the PDC images and identify each by its unique viewbox size:
-//   petal ~60x130, bee ~50x50, face ~130x130.
-// Tall (~60x130) images are collected in resource order: the first is the base
-// petal, any others are the optional "current-hour" pull-off highlight frames
-// (so add petal_pull_N.pdc right AFTER petal.pdc, before the menu bitmap).
+//   petal ~60x130, bee ~50x50, face ~130x130 (first tall image = base petal).
 // We scan until the first miss — that is the menu bitmap (a PNG can't load as a
 // draw-command image), which keeps us from ever touching an out-of-range id.
 function loadDCI(id) {
@@ -62,17 +59,13 @@ function loadDCI(id) {
     catch(e) { return null; }
 }
 let beeDCI = null, faceDCI = null, petalDCI = null;
-const pullIds = [];   // resource ids of the current-hour "pull-off" frames
 for (let id = 1; id <= 64; id++) {
     const dci = loadDCI(id);
     if (!dci) break;       // first miss = menu bitmap; everything past it is the bitmap/MOD
     const w = dci.width, h = dci.height;
-    if      (w >= 100 && h >= 100) faceDCI = dci;     // face ~130x130
-    else if (h >= 100) {                              // tall (~?x130): petal or pull frame
-        if (!petalDCI) petalDCI = dci;               //   first tall = base petal (kept resident)
-        else           pullIds.push(id);             //   rest = pull frames (loaded on demand)
-    }
-    else if (w >= 40)              beeDCI = dci;      // bee ~50x50
+    if      (w >= 100 && h >= 100) faceDCI = dci;          // face ~130x130
+    else if (h >= 100) { if (!petalDCI) petalDCI = dci; }  // first tall = base petal
+    else if (w >= 40)              beeDCI = dci;           // bee ~50x50
     // ~24px-wide weather icons are skipped here; drawn via WX_IDS below
 }
 
@@ -98,13 +91,8 @@ const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV
 // ── State ─────────────────────────────────────────────────────
 let weather      = null;
 let lastDate     = new Date();
-let tugPhase     = 0;      // advances ~1/sec to animate the current-hour petal
+let tugPhase     = 0;      // advances ~1/sec to drive the current-hour petal wobble
 let tugTimer     = null;
-// Pull-off "tug" disabled: loading+cloning a petal frame on every repaint does
-// not fit alongside the ~16KB the weather proxy reserves for app_message — the
-// first paint works, later repaints exhaust the heap and reboot. The current-
-// hour petal falls back to the normal petal until we adopt a lighter approach.
-const TUG_ENABLED = false;
 let currentH12   = (lastDate.getHours() % 12) || 12;
 let useFahrenheit = true;
 try {
@@ -233,49 +221,18 @@ function drawScreen(event) {
     // ~8KB copy per petal once exhausted the heap and rebooted the watch).
     if (petalDCI) {
         const STEP   = 30 * Math.PI / 180;
-        const curPos = currentH12 + 1;           // petal pulled this hour (>12 => none)
-        let pullIdx  = -1;
-        if (TUG_ENABLED && pullIds.length && curPos <= 12) {
-            const n = pullIds.length;
-            if (n === 1) {
-                pullIdx = 0;
-            } else {                              // ping-pong: 1-2-3-2-1-2-3...
-                const period = 2 * (n - 1);
-                const phase  = ((tugPhase % period) + period) % period;
-                pullIdx = phase < n ? phase : period - phase;
-            }
-        }
+        const curPos = currentH12 + 1;           // current-hour petal (>12 => none, at 12:00)
+        // Wobble: gently rock the current-hour petal to draw the eye to it.
+        // Reuses the shared base-petal clone (no frame loading) so it costs no
+        // extra memory — drawing a separate pull-off frame per repaint did not
+        // fit alongside the weather proxy's ~16KB app_message and rebooted.
+        const WOBBLE = [0, 4, 8, 4, 0, -4, -8, -4];   // degrees, ~1s per step
+        const wob = (curPos <= 12) ? WOBBLE[tugPhase % WOBBLE.length] * Math.PI / 180 : 0;
 
-        log("draw: enter h=" + currentH12 + " phase=" + tugPhase + " curPos=" + curPos + " pullIdx=" + pullIdx);
         let pd = null, pdAngle = 0;
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
-            const ar = -(pos - 1) * STEP;
-            if (pos === curPos && pullIdx >= 0) {
-                // highlighted current-hour petal: load its frame on demand
-                // (frames are large; not kept resident) and center on its own
-                // size, since pull frames may be narrower than the 60px petal.
-                log("tug: load id=" + pullIds[pullIdx]);
-                const src = loadDCI(pullIds[pullIdx]);
-                log("tug: loaded=" + !!src);
-                if (src) {
-                    const px = src.width >> 1, py = src.height;
-                    // clone() to a mutable RAM copy before rotate() — a
-                    // resource-backed image can't be rotated in place (this is
-                    // why the base petal clones too).
-                    const frame = src.clone();
-                    log("tug: cloned " + frame.width + "x" + frame.height);
-                    frame.rotate(ar, px, py);
-                    log("tug: rotated");
-                    render.begin();
-                    render.drawDCI(frame, CX - px, CY - py);
-                    render.end();
-                    log("tug: drawn");
-                    continue;
-                }
-                // fall through to the normal petal if the frame failed to load
-            }
-            // normal petal: reuse one base clone, rotated by the delta to angle
+            const ar = -(pos - 1) * STEP + (pos === curPos ? wob : 0);
             if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
             else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
             pdAngle = ar;
@@ -283,7 +240,6 @@ function drawScreen(event) {
             render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
             render.end();
         }
-        log("draw: petals done");
     }
 
     // Layer 3: face + bee + text + weather icon
@@ -338,10 +294,9 @@ function drawScreen(event) {
   }
 }
 
-// ── Current-hour petal "tug" animation ────────────────────────
-// Loops the pull-off frames 1-2-3-2-1 at ~1 fps. Only repaints when there is
-// an active highlighted petal (the lone top petal at 12 o'clock doesn't tug).
-// NB: Timer.set(callback, interval) — callback FIRST (Moddable convention).
+// ── Current-hour petal wobble ─────────────────────────────────
+// Advances the wobble ~1/sec and repaints. Skips the repaint at 12 o'clock
+// (lone top petal — nothing to highlight). Timer.set(callback, interval).
 function animateTug() {
     tugPhase++;
     if (currentH12 < 12) drawScreen();
@@ -356,8 +311,7 @@ class AppBehavior extends Behavior {
         drawScreen();
         log("main: first draw returned");
         requestLocation();
-        if (TUG_ENABLED && pullIds.length >= 2 && !tugTimer)
-            tugTimer = Timer.set(animateTug, 1000);
+        if (!tugTimer) tugTimer = Timer.set(animateTug, 1000);
 
         watch.addEventListener("minutechange", clock => {
             currentH12 = (clock.date.getHours() % 12) || 12;
