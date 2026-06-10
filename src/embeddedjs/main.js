@@ -71,12 +71,14 @@ function petalAnchor(clockDeg) {
 // random ROTATION of the package.json media order — the offset changes from
 // build to build (observed 0, 12, 17), with the MOD archive always last
 // (id 27). So ids can be neither hardcoded nor taken from size classes in
-// id order (a class can wrap around the rotation seam). Instead, scan from
-// id 1 until an unambiguous anchor reveals the offset: the bee (the only
-// PDC between 40 and 99px wide) or icon.png (the only id in 1..26 that
-// fails to load as a draw-command image — ids past the table hard-fault,
-// but 1..26 all exist). Probed images are dropped immediately (decoding
-// costs app heap until GC reclaims it).
+// id order (a class can wrap around the rotation seam). The anchor that
+// reveals the offset must not depend on the ART: identifying the bee by
+// its viewbox broke the moment the weather icons were redrawn at 40x40
+// (the probe anchored on icon_clear and every id came out 4 slots off).
+// The one content-independent anchor is icon.png — the only media entry
+// that is not a PDC, hence the only id in 1..26 that fails to load as a
+// draw-command image. (Ids past the table hard-fault; 1..26 all exist.)
+// Probed images are dropped immediately (decoding costs app heap until GC).
 // Constants are 1-based package.json media POSITIONS — keep in sync.
 const N_MEDIA     = 26;             // media entries (icon.png last)
 const WX_MEDIA = {                  // weather icons, loaded lazily at draw
@@ -102,11 +104,10 @@ function loadDCI(id) {
 
 let rotation = 0;
 for (let id = 1; id <= N_MEDIA; id++) {
-    const dci = loadDCI(id);
-    let m = 0;
-    if (!dci) m = ICON_MEDIA;
-    else if (dci.width >= 40 && dci.width < 100 && dci.height < 100) m = BEE_MEDIA;
-    if (m) { rotation = (id - m + N_MEDIA) % N_MEDIA; break; }
+    if (!loadDCI(id)) {       // the one non-PDC = icon.png = media 26
+        rotation = (id - ICON_MEDIA + N_MEDIA) % N_MEDIA;
+        break;
+    }
 }
 // id of the 1-based media entry m under this build's rotation
 function rid(m) { return ((m - 1 + rotation) % N_MEDIA) + 1; }
@@ -120,8 +121,8 @@ for (let i = 0; i < 3; i++) {
     const f = loadDCI(rid(PETAL_MEDIA + i));
     if (f) petalFrames.push(f);
 }
-if (!petalFrames.length || petalFrames[0].height < 100)
-    trace("[RES] rotation mapping looks wrong (petal probe failed)\n");
+if (!petalFrames.length || petalFrames[0].height < 100 || petalFrames[0].width < 55)
+    trace("[RES] rotation mapping looks wrong (petal_1 isn't ~60x130)\n");
 const beeDCI = loadDCI(rid(BEE_MEDIA));
 memReport("load:art");
 const P_PX   = petalFrames.map(f => f.width >> 1);
