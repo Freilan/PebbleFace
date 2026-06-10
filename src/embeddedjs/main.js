@@ -67,16 +67,19 @@ function petalAnchor(clockDeg) {
 }
 
 // ── Resources ─────────────────────────────────────────────────
-// Resource ids are assigned by package.json `media` ARRAY ORDER, 1-based —
-// confirmed by the build's resource_ball step, which packs entries in media
-// order (then menu icon.png = 26, MOD archive = 27). KEEP IN SYNC WITH
-// package.json. Ids are hardcoded rather than probed because instantiating
-// a PebbleDrawCommandImage decodes the whole PDC onto the app heap and only
-// GC frees it: probing every id piled up ~25 decoded images at startup and
-// exhausted the heap (accel couldn't subscribe, then fxAbort memory full).
-// A wrong id that EXISTS fails catchably (caught below); an id past the end
-// of the resource table hard-faults natively, so never scan upward.
-const WX_IDS = {           // weather icons, loaded lazily at draw time
+// Resource ids are assigned by the build's resource-ball order, which is a
+// random ROTATION of the package.json media order — the offset changes from
+// build to build (observed 0, 12, 17), with the MOD archive always last
+// (id 27). So ids can be neither hardcoded nor taken from size classes in
+// id order (a class can wrap around the rotation seam). Instead, scan from
+// id 1 until an unambiguous anchor reveals the offset: the bee (the only
+// PDC between 40 and 99px wide) or icon.png (the only id in 1..26 that
+// fails to load as a draw-command image — ids past the table hard-fault,
+// but 1..26 all exist). Probed images are dropped immediately (decoding
+// costs app heap until GC reclaims it).
+// Constants are 1-based package.json media POSITIONS — keep in sync.
+const N_MEDIA     = 26;             // media entries (icon.png last)
+const WX_MEDIA = {                  // weather icons, loaded lazily at draw
     "Cloudy":    1,
     "P. Cloudy": 2,
     "Clear":     3,
@@ -84,28 +87,42 @@ const WX_IDS = {           // weather icons, loaded lazily at draw time
     "Snow":      5,
     "Storm":     6,
 };
-const PETAL_IDS   = [7, 8, 9];      // idle frames
-const FALL_IDS    = [10, 11, 12];   // top-of-hour fall sequence
-const FACE_BASE   = 13;             // face_12_11_1 .. face_2_1_2, set-major
+const PETAL_MEDIA = 7;              // petal_1..3: idle frames
+const FALL_MEDIA  = 10;             // petal_fall_1..3: top-of-hour sequence
+const FACE_MEDIA  = 13;             // face_12_11_1 .. face_2_1_2, set-major
 const FACE_FRAMES = 2;              // frames per face set
 const N_SETS      = 6;
-const BEE_ID      = 25;
+const BEE_MEDIA   = 25;
+const ICON_MEDIA  = 26;             // menu icon.png (not loadable as PDC)
 
 function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
 }
 
+let rotation = 0;
+for (let id = 1; id <= N_MEDIA; id++) {
+    const dci = loadDCI(id);
+    let m = 0;
+    if (!dci) m = ICON_MEDIA;
+    else if (dci.width >= 40 && dci.width < 100 && dci.height < 100) m = BEE_MEDIA;
+    if (m) { rotation = (id - m + N_MEDIA) % N_MEDIA; break; }
+}
+// id of the 1-based media entry m under this build's rotation
+function rid(m) { return ((m - 1 + rotation) % N_MEDIA) + 1; }
+
 // Resident images: the 3 petal idle frames, the bee, and the current face
 // set (2 frames, reloaded every two hours). Fall frames are loaded one at a
 // time only while the top-of-hour drop plays — keeping all three alongside
 // a repaint's clones has blown the heap before.
 const petalFrames = [];
-for (let i = 0; i < PETAL_IDS.length; i++) {
-    const f = loadDCI(PETAL_IDS[i]);
+for (let i = 0; i < 3; i++) {
+    const f = loadDCI(rid(PETAL_MEDIA + i));
     if (f) petalFrames.push(f);
 }
-const beeDCI = loadDCI(BEE_ID);
+if (!petalFrames.length || petalFrames[0].height < 100)
+    trace("[RES] rotation mapping looks wrong (petal probe failed)\n");
+const beeDCI = loadDCI(rid(BEE_MEDIA));
 memReport("load:art");
 const P_PX   = petalFrames.map(f => f.width >> 1);
 const P_PY   = petalFrames.map(f => f.height);
@@ -122,7 +139,7 @@ function loadFaceSet(h12) {
     faceSetIdx = si;
     faceSet = [];                        // release the old set before loading
     for (let f = 0; f < FACE_FRAMES; f++) {
-        const img = loadDCI(FACE_BASE + si * FACE_FRAMES + f);
+        const img = loadDCI(rid(FACE_MEDIA + si * FACE_FRAMES + f));
         if (img) faceSet.push(img);
     }
 }
@@ -184,16 +201,16 @@ let fallDCI = null, fallPos = 0, fallStep = 0, fallTimer = null;
 function startFall(pos) {
     fallPos  = pos;
     fallStep = 0;
-    fallDCI  = loadDCI(FALL_IDS[0]);
+    fallDCI  = loadDCI(rid(FALL_MEDIA));
     if (fallTimer) Timer.clear(fallTimer);
     fallTimer = Timer.repeat(() => {
         fallStep++;
-        if (fallStep >= FALL_IDS.length) {
+        if (fallStep >= 3) {
             Timer.clear(fallTimer);
             fallTimer = null;
             fallDCI   = null;            // petal has fallen
         }
-        else fallDCI = loadDCI(FALL_IDS[fallStep]);
+        else fallDCI = loadDCI(rid(FALL_MEDIA + fallStep));
         drawScreen();
     }, FALL_MS);
 }
@@ -421,14 +438,12 @@ function drawScreen(event) {
     // replacing the old text label (e.g. "Cloudy"). Centered on the anchor.
     a = petalAnchor(90);
     if (weather) {
-        const iconId = WX_IDS[weather.desc];
-        if (iconId !== undefined) {
-            try {
-                const icon = new Poco.PebbleDrawCommandImage(iconId);
-                render.drawDCI(icon,
-                    a.x - (icon.width  >> 1),
-                    a.y - (icon.height >> 1));
-            } catch(e) {}
+        const iconMedia = WX_MEDIA[weather.desc];
+        if (iconMedia !== undefined) {
+            const icon = loadDCI(rid(iconMedia));
+            if (icon) render.drawDCI(icon,
+                a.x - (icon.width  >> 1),
+                a.y - (icon.height >> 1));
         }
     }
 
