@@ -8,6 +8,7 @@ import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
 import Accelerometer from "embedded:sensor/Accelerometer";
+import Message from "pebble/message";
 
 const render = new Poco(screen);
 
@@ -45,38 +46,45 @@ function petalAnchor(clockDeg) {
 }
 
 // ── Resources ─────────────────────────────────────────────────
-// Resource ids depend on package.json `media` ORDER and have proven fragile:
-// a wrong/out-of-range id hard-faults and crash-loops the watch (a native
-// fault that a JS try/catch cannot trap). So rather than hardcode ids, probe
-// the PDC images and classify each by viewbox size:
-//   face frames ~130x130, petal idle frames ~60x130 (>= 55 wide),
-//   fall frames ~50x130 (< 55 wide), bee ~50x50.
-// Within a class, frame order = media order (ids ascend). We scan until the
-// first miss — that is the menu bitmap (a PNG can't load as a draw-command
-// image), which keeps us from ever touching an out-of-range id. The probe
-// keeps only ids, not images, so the scan leaves nothing resident.
+// Resource ids are assigned by package.json `media` ARRAY ORDER, 1-based —
+// confirmed by the build's resource_ball step, which packs entries in media
+// order (then menu icon.png = 26, MOD archive = 27). KEEP IN SYNC WITH
+// package.json. Ids are hardcoded rather than probed because instantiating
+// a PebbleDrawCommandImage decodes the whole PDC onto the app heap and only
+// GC frees it: probing every id piled up ~25 decoded images at startup and
+// exhausted the heap (accel couldn't subscribe, then fxAbort memory full).
+// A wrong id that EXISTS fails catchably (caught below); an id past the end
+// of the resource table hard-faults natively, so never scan upward.
+const WX_IDS = {           // weather icons, loaded lazily at draw time
+    "Cloudy":    1,
+    "P. Cloudy": 2,
+    "Clear":     3,
+    "Rain":      4,
+    "Snow":      5,
+    "Storm":     6,
+};
+const PETAL_IDS   = [7, 8, 9];      // idle frames
+const FALL_IDS    = [10, 11, 12];   // top-of-hour fall sequence
+const FACE_BASE   = 13;             // face_12_11_1 .. face_2_1_2, set-major
+const FACE_FRAMES = 2;              // frames per face set
+const N_SETS      = 6;
+const BEE_ID      = 25;
+
 function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
-}
-const petalIds = [], fallIds = [], faceIds = [];
-let beeId = 0;
-for (let id = 1; id <= 64; id++) {
-    const dci = loadDCI(id);
-    if (!dci) break;       // first miss = menu bitmap; everything past it is the bitmap/MOD
-    const w = dci.width, h = dci.height;
-    if      (w >= 100 && h >= 100) faceIds.push(id);
-    else if (h >= 100)             (w >= 55 ? petalIds : fallIds).push(id);
-    else if (w >= 40)              beeId = id;
-    // ~24px-wide weather icons are skipped here; drawn via WX_IDS below
 }
 
 // Resident images: the 3 petal idle frames, the bee, and the current face
 // set (2 frames, reloaded every two hours). Fall frames are loaded one at a
 // time only while the top-of-hour drop plays — keeping all three alongside
 // a repaint's clones has blown the heap before.
-const petalFrames = petalIds.map(id => new Poco.PebbleDrawCommandImage(id));
-const beeDCI = beeId ? new Poco.PebbleDrawCommandImage(beeId) : null;
+const petalFrames = [];
+for (let i = 0; i < PETAL_IDS.length; i++) {
+    const f = loadDCI(PETAL_IDS[i]);
+    if (f) petalFrames.push(f);
+}
+const beeDCI = loadDCI(BEE_ID);
 const P_PX   = petalFrames.map(f => f.width >> 1);
 const P_PY   = petalFrames.map(f => f.height);
 const BEE_PX = beeDCI ? beeDCI.width  >> 1 : 0;
@@ -84,32 +92,18 @@ const BEE_PY = beeDCI ? beeDCI.height >> 1 : 0;
 
 // Face sets keyed by petals remaining: set 0 = 12 & 11 left (hours 1-2),
 // set 1 = 10 & 9 (hours 3-4), ... set 5 = 2 & 1 left (hours 11-12).
-const FACE_FRAMES = 2;                   // frames per face set
-let faceSet = [], faceSetIdx = -2;
+let faceSet = [], faceSetIdx = -1;
 function loadFaceSet(h12) {
-    const nSets = (faceIds.length / FACE_FRAMES) | 0;
     let si = (h12 - 1) >> 1;
-    if (si >= nSets) si = nSets - 1;
+    if (si >= N_SETS) si = N_SETS - 1;
     if (si === faceSetIdx) return;
     faceSetIdx = si;
     faceSet = [];                        // release the old set before loading
-    if (si < 0) {                        // fewer than a full set in the build
-        if (faceIds.length) faceSet.push(new Poco.PebbleDrawCommandImage(faceIds[0]));
-        return;
+    for (let f = 0; f < FACE_FRAMES; f++) {
+        const img = loadDCI(FACE_BASE + si * FACE_FRAMES + f);
+        if (img) faceSet.push(img);
     }
-    for (let f = 0; f < FACE_FRAMES; f++)
-        faceSet.push(new Poco.PebbleDrawCommandImage(faceIds[si * FACE_FRAMES + f]));
 }
-
-// Weather icon resource IDs — loaded lazily at draw time
-const WX_IDS = {
-    "Clear":     3,
-    "Cloudy":    1,
-    "P. Cloudy": 2,
-    "Rain":      4,
-    "Snow":      5,
-    "Storm":     6,
-};
 
 // ── Lookup tables ─────────────────────────────────────────────
 const DAYS   = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
@@ -166,21 +160,33 @@ const FALL_MS = 400;
 let fallDCI = null, fallPos = 0, fallStep = 0, fallTimer = null;
 
 function startFall(pos) {
-    if (!fallIds.length) return;
     fallPos  = pos;
     fallStep = 0;
-    fallDCI  = loadDCI(fallIds[0]);
+    fallDCI  = loadDCI(FALL_IDS[0]);
     if (fallTimer) Timer.clear(fallTimer);
     fallTimer = Timer.repeat(() => {
         fallStep++;
-        if (fallStep >= fallIds.length) {
+        if (fallStep >= FALL_IDS.length) {
             Timer.clear(fallTimer);
             fallTimer = null;
             fallDCI   = null;            // petal has fallen
         }
-        else fallDCI = loadDCI(fallIds[fallStep]);
+        else fallDCI = loadDCI(FALL_IDS[fallStep]);
         drawScreen();
     }, FALL_MS);
+}
+
+// ── app_message channel ───────────────────────────────────────
+// The FIRST Message created fixes the app_message buffer sizes for the
+// app's life; the default is maximum (8200 in + 8200 out = 16.4KB of heap).
+// Location passes no sizes, so open the channel small BEFORE anything else
+// does. Safe: the phone proxy fragments HTTP responses to fit the inbox,
+// and our weather JSON / Clay settings are a few hundred bytes. Kept alive
+// for the app's life (module-level ref).
+let msgChannel = null;
+function openMessageChannel() {
+    try { msgChannel = new Message({ input: 2048, output: 1024 }); }
+    catch(e) {}
 }
 
 // ── Petal visibility ──────────────────────────────────────────
@@ -287,10 +293,16 @@ function drawScreen(event) {
     const now = (event && event.date) ? event.date : lastDate;
     if (event && event.date) lastDate = event.date;
   try {
-    // Layer 1: background + dots
-    render.begin();
-    render.fillRectangle(C_BG, 0, 0, W, H);
+    // Layer 1: background + dots, one horizontal band per dot row so the
+    // display list stays small (~90 rects per band vs ~700 for the whole
+    // field in one begin/end — that's what forced displayListLength=16384).
+    // Bands meet halfway between rows and tile the screen exactly; a dot is
+    // 9px tall on a 27px grid, so no dot ever straddles a band.
     for (let ddy = -126; ddy <= 126; ddy += DOT_GRID) {
+        const yTop = (ddy === -126) ? 0 : CY + ddy - (DOT_GRID >> 1);
+        const yBot = (ddy + DOT_GRID > 126) ? H : CY + ddy + DOT_GRID - (DOT_GRID >> 1);
+        render.begin(0, yTop, W, yBot - yTop);
+        render.fillRectangle(C_BG, 0, 0, W, H);
         const row = Math.round((ddy + 126) / DOT_GRID);
         const ox  = (row % 2 === 0) ? 0 : DOT_GRID >> 1;
         for (let ddx = -126; ddx <= 126; ddx += DOT_GRID) {
@@ -308,8 +320,8 @@ function drawScreen(event) {
                 render.fillRectangle(C_DOT, px-2, py+4, 4, 1);
             }
         }
+        render.end();
     }
-    render.end();
 
     // Layer 2: petals. Each visible petal shows one of the 3 idle frames
     // (per-petal rate/phase; frame 0 outside the animation window). One
@@ -408,15 +420,20 @@ function drawScreen(event) {
 // ── App behavior ──────────────────────────────────────────────
 class AppBehavior extends Behavior {
     onDisplaying(application) {
-        loadCachedWeather();
-        loadFaceSet(currentH12);
-        drawScreen();
-        requestLocation();
-
+        // Order matters for the heap: subscribe the accelerometer FIRST
+        // (its session allocates from the app heap and failed when created
+        // after app_message), then open the app_message channel small,
+        // before Location/fetch can open it at maximum.
         // Wrist flick / tap → one short animation window. Created once and
         // kept for the app's life (the runtime allows only one instance;
         // close+reopen of sensors has proven fatal — see requestLocation).
         try { accel = new Accelerometer({ onTap: startAnim }); } catch(e) {}
+        openMessageChannel();
+
+        loadCachedWeather();
+        loadFaceSet(currentH12);
+        drawScreen();
+        requestLocation();
         startAnim();    // launching the face means the user is looking
 
         watch.addEventListener("minutechange", clock => {
@@ -438,7 +455,7 @@ const FaceApplication = Application.template($ => ({
 }));
 
 export default new FaceApplication(null, {
-    displayListLength: 16384,
-    touchCount: 0,
+    displayListLength: 4096,    // background draws per dot-row band, so the
+    touchCount: 0,              // worst begin/end is ~90 rects, not ~700
     pixels: screen.width * 4,
 });
