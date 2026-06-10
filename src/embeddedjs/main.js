@@ -209,16 +209,18 @@ try {
 const TICK_MS    = 250;    // animation timebase
 const ANIM_TICKS = 32;     // ~8s window per flick/tap
 const FACE_TICKS = 4;      // face frame advances ~1x/sec
-// Per-petal frame period in ticks (2..6 = 0.5s..1.5s). Neighbours (incl. 12
-// next to 1) always differ, so adjacent petals visibly run out of step; the
-// +pos phase in petalFrameIdx desyncs petals that share a period.
-const PETAL_TICKS = [4,2,5,3,6,2,4,6,3,5,2,5];
 let tickCount = 0, animLeft = 0, animTimer = null;
 let accel = null;          // keep the instance alive — GC would unsubscribe tap
+let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
 
-function petalFrameIdx(pos) {
+// All petals advance together (~1x/sec, offset 2 ticks from the face flip
+// so the whole flower doesn't change at once). Per-petal staggered rates
+// were dropped: each distinct frame on screen costs one clone PER TICK
+// (~1.7KB of app heap each), and three chains churned ~5.4KB/tick — more
+// than the GC reclaimed in time.
+function petalFrameIdx() {
     if (!animLeft || petalFrames.length < 2) return 0;
-    return (((tickCount / PETAL_TICKS[pos - 1]) | 0) + pos) % petalFrames.length;
+    return ((tickCount + 2) >> 2) % petalFrames.length;
 }
 
 function animTick() {
@@ -229,6 +231,14 @@ function animTick() {
         animLeft = 0;
     }
     drawScreen();
+    // XS garbage-collects on CHUNK pressure only and cannot see the app
+    // heap behind each clone — and chunk garbage is just ~300B/tick, so
+    // the pool alone would let native garbage pile up for many ticks.
+    // Nudge the GC every other tick (small ask: an over-pool chunk
+    // allocation aborts rather than throws).
+    if (!(tickCount & 1)) {
+        try { new ArrayBuffer(1024); } catch(e) {}
+    }
     if (!(tickCount & 3)) memLine(tickCount);
 }
 
@@ -415,22 +425,19 @@ function drawScreen(event) {
         render.end();
     }
 
-    // Layer 2: petals. Each visible petal shows one of the 3 idle frames
-    // (per-petal rate/phase; frame 0 outside the animation window). One
-    // clone per frame IMAGE in use — not per petal: petals sharing a frame
-    // reuse its clone, rotated incrementally to each position (per-petal
-    // clones would churn too much memory per repaint).
+    // Layer 2: petals. All petals show the same idle frame (frame 0
+    // outside the animation window): ONE clone per repaint, rotated
+    // incrementally to each position.
     if (petalFrames.length) {
-        const STEP   = 30 * Math.PI / 180;
-        const clones = [null, null, null], angles = [0, 0, 0];
+        const STEP = 30 * Math.PI / 180;
+        const fi   = petalFrameIdx();
+        let pd = null, pdAngle = 0;
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
-            const fi = petalFrameIdx(pos);
             const ar = -(pos - 1) * STEP;
-            let pd = clones[fi];
-            if (!pd) pd = clones[fi] = petalFrames[fi].clone().rotate(ar, P_PX[fi], P_PY[fi]);
-            else     pd.rotate(ar - angles[fi], P_PX[fi], P_PY[fi]);
-            angles[fi] = ar;
+            if (!pd) pd = petalFrames[fi].clone().rotate(ar, P_PX[fi], P_PY[fi]);
+            else     pd.rotate(ar - pdAngle, P_PX[fi], P_PY[fi]);
+            pdAngle = ar;
             render.begin();
             render.drawDCI(pd, CX - P_PX[fi], CY - P_PY[fi]);
             render.end();
@@ -447,12 +454,18 @@ function drawScreen(event) {
         }
     }
 
-    // Layer 3: face + bee + text + weather icon
+    // Layer 3: face + bee + text + weather icon. The bee's angle only
+    // changes on the minute, so its rotated clone is cached — re-cloning
+    // it every animation tick was pure app-heap churn.
     const minutes  = now.getMinutes();
     const beeAngle = (minutes / 60) * TWO_PI;
     const beeX     = Math.round(CX + BEE_R * Math.sin(beeAngle));
     const beeY     = Math.round(CY - BEE_R * Math.cos(beeAngle));
-    const bd = beeDCI ? beeDCI.clone().rotate(Math.PI - beeAngle, BEE_PX, BEE_PY) : null;
+    if (beeDCI && minutes !== beeCloneMin) {
+        beeCloneMin = minutes;
+        beeClone = beeDCI.clone().rotate(Math.PI - beeAngle, BEE_PX, BEE_PY);
+    }
+    const bd = beeClone;
 
     // Face: current set's frame, advancing ~1x/sec during the animation
     // window (resident — drawn straight from the set, no clone).

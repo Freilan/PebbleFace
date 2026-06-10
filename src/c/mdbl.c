@@ -22,17 +22,18 @@ typedef struct {
 int main(void) {
   Window *w = window_create();
   window_stack_push(w, true);
-  // Chunk size doubles as the GC throttle: XS only collects on chunk
-  // pressure and cannot see the app-heap memory backing image clones
-  // (~5KB per animation tick). A 16KB pool meant a GC only every ~6 ticks,
-  // by which time ~30KB of invisible native garbage had exhausted the
-  // heap (~1.5s after launch). 10KB fits the ~5.6KB live set comfortably
-  // while forcing a GC every ~2-3 ticks, capping native garbage at ~15KB.
+  // Chunk sizing: measured live set is ~6KB but the weather fetch holds
+  // ~10KB of chunk transiently, and a chunk ask that fails when the pool
+  // is full of yet-uncollected garbage aborts the app (observed: a 120B
+  // ask died at 10,128/10,240 used during fetch). 14KB keeps the fetch
+  // peak clear of the ceiling. Chunk pressure is NOT a usable GC throttle
+  // (steady-state chunk garbage is only ~300B/tick); the animation loop
+  // nudges the GC explicitly instead — see animTick in main.js.
   MdblCreationRecord cr = {
     .recordSize = sizeof(MdblCreationRecord),
     .stack = 6144,
     .slot  = 28672,
-    .chunk = 10240,
+    .chunk = 14336,
     .flags = 0,
     .fxBuildFFI = NULL,
   };
