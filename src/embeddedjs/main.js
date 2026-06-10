@@ -28,6 +28,23 @@ function memReport(tag) {
         trace("  (instrumentation unavailable)\n");
     }
 }
+// One-line snapshot, cheap enough to run during animation ticks.
+let iFree = 0, iSlot = 0, iChunk = 0, iGC = 0;
+try {
+    iFree  = Instrumentation.map("System Free Memory");
+    iSlot  = Instrumentation.map("XS Slot Heap Used");
+    iChunk = Instrumentation.map("XS Chunk Heap Used");
+    iGC    = Instrumentation.map("XS Garbage Collection Count");
+} catch(e) {}
+function memLine(tag) {
+    if (!iFree) return;
+    try {
+        trace("[T ", tag, "] free=", Instrumentation.get(iFree),
+              " slot=", Instrumentation.get(iSlot),
+              " chunk=", Instrumentation.get(iChunk),
+              " gc=", Instrumentation.get(iGC), "\n");
+    } catch(e) {}
+}
 memReport("load:imports");
 
 const render = new Poco(screen);
@@ -212,6 +229,7 @@ function animTick() {
         animLeft = 0;
     }
     drawScreen();
+    if (!(tickCount & 3)) memLine(tickCount);
 }
 
 function startAnim() {
@@ -291,6 +309,7 @@ let locating = false;
 function requestLocation() {
     if (locating) return;
     locating = true;
+    trace("[WX] locating\n");
     try {
         new Location({
             onSample() {
@@ -298,6 +317,7 @@ function requestLocation() {
                 try {
                     const s = this.sample();
                     this.close();
+                    trace("[WX] got location\n");
                     fetchWeather(s.latitude, s.longitude);
                 } catch(e) {}
             }
@@ -307,6 +327,8 @@ function requestLocation() {
 
 async function fetchWeather(lat, lon) {
     try {
+        trace("[WX] fetching\n");
+        memLine("fetch");
         const u = useFahrenheit ? "&temperature_unit=fahrenheit" : "";
         const url = "http://api.open-meteo.com/v1/forecast"
             + "?latitude=" + lat + "&longitude=" + lon
@@ -323,8 +345,12 @@ async function fetchWeather(lat, lon) {
             localStorage.setItem("weather", JSON.stringify(weather));
             localStorage.setItem("weatherTime", String(Date.now()));
         } catch(e) {}
-        drawScreen();
-    } catch(e) {}
+        trace("[WX] applied\n");
+        memLine("applied");
+        // While the animation runs, the next tick repaints within 250ms —
+        // skip the extra draw at this (heaviest) moment.
+        if (!animTimer) drawScreen();
+    } catch(e) { trace("[WX] failed ", String(e), "\n"); }
 }
 
 // ── strokeText ────────────────────────────────────────────────
