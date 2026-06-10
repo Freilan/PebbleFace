@@ -111,12 +111,6 @@
                     "type": "raw"
                 },
                 {
-                    "file": "data/face_12_11_3.pdc",
-                    "name": "FACE_12_11_3",
-                    "targetPlatforms": null,
-                    "type": "raw"
-                },
-                {
                     "file": "data/face_10_9_1.pdc",
                     "name": "FACE_10_9_1",
                     "targetPlatforms": null,
@@ -125,12 +119,6 @@
                 {
                     "file": "data/face_10_9_2.pdc",
                     "name": "FACE_10_9_2",
-                    "targetPlatforms": null,
-                    "type": "raw"
-                },
-                {
-                    "file": "data/face_10_9_3.pdc",
-                    "name": "FACE_10_9_3",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
@@ -147,12 +135,6 @@
                     "type": "raw"
                 },
                 {
-                    "file": "data/face_8_7_3.pdc",
-                    "name": "FACE_8_7_3",
-                    "targetPlatforms": null,
-                    "type": "raw"
-                },
-                {
                     "file": "data/face_6_5_1.pdc",
                     "name": "FACE_6_5_1",
                     "targetPlatforms": null,
@@ -161,12 +143,6 @@
                 {
                     "file": "data/face_6_5_2.pdc",
                     "name": "FACE_6_5_2",
-                    "targetPlatforms": null,
-                    "type": "raw"
-                },
-                {
-                    "file": "data/face_6_5_3.pdc",
-                    "name": "FACE_6_5_3",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
@@ -183,12 +159,6 @@
                     "type": "raw"
                 },
                 {
-                    "file": "data/face_4_3_3.pdc",
-                    "name": "FACE_4_3_3",
-                    "targetPlatforms": null,
-                    "type": "raw"
-                },
-                {
                     "file": "data/face_2_1_1.pdc",
                     "name": "FACE_2_1_1",
                     "targetPlatforms": null,
@@ -197,12 +167,6 @@
                 {
                     "file": "data/face_2_1_2.pdc",
                     "name": "FACE_2_1_2",
-                    "targetPlatforms": null,
-                    "type": "raw"
-                },
-                {
-                    "file": "data/face_2_1_3.pdc",
-                    "name": "FACE_2_1_3",
                     "targetPlatforms": null,
                     "type": "raw"
                 },

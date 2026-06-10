@@ -72,7 +72,7 @@ for (let id = 1; id <= 64; id++) {
 }
 
 // Resident images: the 3 petal idle frames, the bee, and the current face
-// set (3 frames, reloaded every two hours). Fall frames are loaded one at a
+// set (2 frames, reloaded every two hours). Fall frames are loaded one at a
 // time only while the top-of-hour drop plays — keeping all three alongside
 // a repaint's clones has blown the heap before.
 const petalFrames = petalIds.map(id => new Poco.PebbleDrawCommandImage(id));
@@ -84,20 +84,21 @@ const BEE_PY = beeDCI ? beeDCI.height >> 1 : 0;
 
 // Face sets keyed by petals remaining: set 0 = 12 & 11 left (hours 1-2),
 // set 1 = 10 & 9 (hours 3-4), ... set 5 = 2 & 1 left (hours 11-12).
+const FACE_FRAMES = 2;                   // frames per face set
 let faceSet = [], faceSetIdx = -2;
 function loadFaceSet(h12) {
-    const nSets = (faceIds.length / 3) | 0;
+    const nSets = (faceIds.length / FACE_FRAMES) | 0;
     let si = (h12 - 1) >> 1;
     if (si >= nSets) si = nSets - 1;
     if (si === faceSetIdx) return;
     faceSetIdx = si;
     faceSet = [];                        // release the old set before loading
-    if (si < 0) {                        // fewer than 3 face images in build
+    if (si < 0) {                        // fewer than a full set in the build
         if (faceIds.length) faceSet.push(new Poco.PebbleDrawCommandImage(faceIds[0]));
         return;
     }
-    for (let f = 0; f < 3; f++)
-        faceSet.push(new Poco.PebbleDrawCommandImage(faceIds[si * 3 + f]));
+    for (let f = 0; f < FACE_FRAMES; f++)
+        faceSet.push(new Poco.PebbleDrawCommandImage(faceIds[si * FACE_FRAMES + f]));
 }
 
 // Weather icon resource IDs — loaded lazily at draw time
