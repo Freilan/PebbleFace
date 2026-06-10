@@ -9,6 +9,26 @@ import Timer from "timer";
 import Location from "embedded:sensor/Location";
 import Accelerometer from "embedded:sensor/Accelerometer";
 import Message from "pebble/message";
+import Instrumentation from "instrumentation";
+
+// ── Startup memory diagnostics (TEMPORARY — strip when stable) ──
+// Dumps every XS instrumentation counter (chunk/slot heap, system free,
+// display list, ...) to the app log at each startup stage, to find which
+// stage hits the allocation wall and how big each pool actually is.
+// Variadic trace (no string concat) keeps the report itself nearly free.
+function memReport(tag) {
+    trace("[MEM] ", tag, "\n");
+    try {
+        for (let i = 1; i < 64; i++) {
+            const name = Instrumentation.name(i);
+            if (!name) break;
+            trace("  ", name, "=", Instrumentation.get(i), "\n");
+        }
+    } catch(e) {
+        trace("  (instrumentation unavailable)\n");
+    }
+}
+memReport("load:imports");
 
 const render = new Poco(screen);
 
@@ -19,6 +39,7 @@ function getFont(name, size) {
     return f;
 }
 const font = getFont("MarkerFelt10", 20);
+memReport("load:font");
 
 // ── Colors ────────────────────────────────────────────────────
 const C_BG    = render.makeColor( 85, 255, 170);
@@ -85,6 +106,7 @@ for (let i = 0; i < PETAL_IDS.length; i++) {
     if (f) petalFrames.push(f);
 }
 const beeDCI = loadDCI(BEE_ID);
+memReport("load:art");
 const P_PX   = petalFrames.map(f => f.width >> 1);
 const P_PY   = petalFrames.map(f => f.height);
 const BEE_PX = beeDCI ? beeDCI.width  >> 1 : 0;
@@ -427,14 +449,19 @@ class AppBehavior extends Behavior {
         // Wrist flick / tap → one short animation window. Created once and
         // kept for the app's life (the runtime allows only one instance;
         // close+reopen of sensors has proven fatal — see requestLocation).
+        memReport("disp:enter");
         try { accel = new Accelerometer({ onTap: startAnim }); } catch(e) {}
+        memReport("disp:accel");
         openMessageChannel();
+        memReport("disp:msg");
 
         loadCachedWeather();
         loadFaceSet(currentH12);
         drawScreen();
+        memReport("disp:draw1");
         requestLocation();
         startAnim();    // launching the face means the user is looking
+        memReport("disp:anim");
 
         watch.addEventListener("minutechange", clock => {
             const h = (clock.date.getHours() % 12) || 12;
@@ -453,6 +480,7 @@ class AppBehavior extends Behavior {
 const FaceApplication = Application.template($ => ({
     Behavior: AppBehavior,
 }));
+memReport("load:pre-app");
 
 export default new FaceApplication(null, {
     displayListLength: 4096,    // background draws per dot-row band, so the
