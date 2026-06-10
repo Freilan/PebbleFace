@@ -129,10 +129,11 @@ if (rotation < 0) {
     try { localStorage.setItem("rotation", String(rotation)); } catch(e) {}
     // Release the probe's pinned decodes ASAP: from a fresh job (WeakRef
     // targets are only collectable after the creating job ends), apply
-    // chunk pressure in small steps until the GC runs. Small buffers so a
-    // single ask can never exceed the fixed chunk pool (which would abort).
+    // chunk pressure in small steps until the GC runs. Buffers stay small
+    // relative to the 10KB chunk pool: an ask that can't fit even after
+    // GC aborts the app rather than throwing.
     Timer.set(() => {
-        try { for (let i = 0; i < 4; i++) new ArrayBuffer(4096); } catch(e) {}
+        try { for (let i = 0; i < 5; i++) new ArrayBuffer(2048); } catch(e) {}
     });
 }
 

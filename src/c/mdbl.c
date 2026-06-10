@@ -22,11 +22,17 @@ typedef struct {
 int main(void) {
   Window *w = window_create();
   window_stack_push(w, true);
+  // Chunk size doubles as the GC throttle: XS only collects on chunk
+  // pressure and cannot see the app-heap memory backing image clones
+  // (~5KB per animation tick). A 16KB pool meant a GC only every ~6 ticks,
+  // by which time ~30KB of invisible native garbage had exhausted the
+  // heap (~1.5s after launch). 10KB fits the ~5.6KB live set comfortably
+  // while forcing a GC every ~2-3 ticks, capping native garbage at ~15KB.
   MdblCreationRecord cr = {
     .recordSize = sizeof(MdblCreationRecord),
     .stack = 6144,
     .slot  = 28672,
-    .chunk = 16384,
+    .chunk = 10240,
     .flags = 0,
     .fxBuildFFI = NULL,
   };
