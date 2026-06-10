@@ -28,67 +28,187 @@
             "media": [
                 {
                     "file": "data/icon_cloudy.pdc",
-                    "name": "6",
+                    "name": "WX_CLOUDY",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
                 {
                     "file": "data/icon_pcloudy.pdc",
-                    "name": "7",
+                    "name": "WX_PCLOUDY",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
                 {
                     "file": "data/icon_clear.pdc",
-                    "name": "5",
+                    "name": "WX_CLEAR",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
                 {
                     "file": "data/icon_rain.pdc",
-                    "name": "8",
+                    "name": "WX_RAIN",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
                 {
                     "file": "data/icon_snow.pdc",
-                    "name": "9",
+                    "name": "WX_SNOW",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
                 {
                     "file": "data/icon_storm.pdc",
-                    "name": "10",
+                    "name": "WX_STORM",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
                 {
-                    "file": "data/petal.pdc",
-                    "name": "2",
+                    "file": "data/petal_1.pdc",
+                    "name": "PETAL_1",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
                 {
-                    "file": "data/petal_pull_2.pdc",
-                    "name": "12",
+                    "file": "data/petal_2.pdc",
+                    "name": "PETAL_2",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
                 {
-                    "file": "data/petal_pull_3.pdc",
-                    "name": "13",
+                    "file": "data/petal_3.pdc",
+                    "name": "PETAL_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/petal_fall_1.pdc",
+                    "name": "FALL_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/petal_fall_2.pdc",
+                    "name": "FALL_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/petal_fall_3.pdc",
+                    "name": "FALL_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_12_11_1.pdc",
+                    "name": "FACE_12_11_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_12_11_2.pdc",
+                    "name": "FACE_12_11_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_12_11_3.pdc",
+                    "name": "FACE_12_11_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_10_9_1.pdc",
+                    "name": "FACE_10_9_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_10_9_2.pdc",
+                    "name": "FACE_10_9_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_10_9_3.pdc",
+                    "name": "FACE_10_9_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_8_7_1.pdc",
+                    "name": "FACE_8_7_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_8_7_2.pdc",
+                    "name": "FACE_8_7_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_8_7_3.pdc",
+                    "name": "FACE_8_7_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_6_5_1.pdc",
+                    "name": "FACE_6_5_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_6_5_2.pdc",
+                    "name": "FACE_6_5_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_6_5_3.pdc",
+                    "name": "FACE_6_5_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_4_3_1.pdc",
+                    "name": "FACE_4_3_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_4_3_2.pdc",
+                    "name": "FACE_4_3_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_4_3_3.pdc",
+                    "name": "FACE_4_3_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_2_1_1.pdc",
+                    "name": "FACE_2_1_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_2_1_2.pdc",
+                    "name": "FACE_2_1_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/face_2_1_3.pdc",
+                    "name": "FACE_2_1_3",
                     "targetPlatforms": null,
                     "type": "raw"
                 },
                 {
                     "file": "data/bee.pdc",
-                    "name": "3",
-                    "targetPlatforms": null,
-                    "type": "raw"
-                },
-                {
-                    "file": "data/face.pdc",
-                    "name": "4",
+                    "name": "BEE",
                     "targetPlatforms": null,
                     "type": "raw"
                 },

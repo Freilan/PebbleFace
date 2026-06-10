@@ -7,6 +7,7 @@ import parseBMF from "commodetto/parseBMF";
 import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
+import Accelerometer from "embedded:sensor/Accelerometer";
 
 const render = new Poco(screen);
 
@@ -47,33 +48,57 @@ function petalAnchor(clockDeg) {
 // Resource ids depend on package.json `media` ORDER and have proven fragile:
 // a wrong/out-of-range id hard-faults and crash-loops the watch (a native
 // fault that a JS try/catch cannot trap). So rather than hardcode ids, probe
-// the PDC images and identify each by its unique viewbox size:
-//   petal ~60x130, bee ~50x50, face ~130x130 (first tall image = base petal).
-// We scan until the first miss — that is the menu bitmap (a PNG can't load as a
-// draw-command image), which keeps us from ever touching an out-of-range id.
+// the PDC images and classify each by viewbox size:
+//   face frames ~130x130, petal idle frames ~60x130 (>= 55 wide),
+//   fall frames ~50x130 (< 55 wide), bee ~50x50.
+// Within a class, frame order = media order (ids ascend). We scan until the
+// first miss — that is the menu bitmap (a PNG can't load as a draw-command
+// image), which keeps us from ever touching an out-of-range id. The probe
+// keeps only ids, not images, so the scan leaves nothing resident.
 function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
 }
-let beeDCI = null, faceDCI = null, petalDCI = null;
-const pullFrames = [];   // current-hour "pull-off" frames (50w), in load order
+const petalIds = [], fallIds = [], faceIds = [];
+let beeId = 0;
 for (let id = 1; id <= 64; id++) {
     const dci = loadDCI(id);
     if (!dci) break;       // first miss = menu bitmap; everything past it is the bitmap/MOD
     const w = dci.width, h = dci.height;
-    if      (w >= 100 && h >= 100) faceDCI = dci;     // face ~130x130
-    else if (h >= 100) {                              // tall petals
-        if (w >= 55) petalDCI = dci;                 //   ~60 wide = base petal (also pull frame 1)
-        else         pullFrames.push(dci);           //   ~50 wide = pull-off frames (animation)
-    }
-    else if (w >= 40)              beeDCI = dci;      // bee ~50x50
+    if      (w >= 100 && h >= 100) faceIds.push(id);
+    else if (h >= 100)             (w >= 55 ? petalIds : fallIds).push(id);
+    else if (w >= 40)              beeId = id;
     // ~24px-wide weather icons are skipped here; drawn via WX_IDS below
 }
 
-const PETAL_PX = petalDCI ? petalDCI.width  >> 1 : 0;
-const PETAL_PY = petalDCI ? petalDCI.height      : 0;
-const BEE_PX   = beeDCI   ? beeDCI.width  >> 1 : 0;
-const BEE_PY   = beeDCI   ? beeDCI.height >> 1 : 0;
+// Resident images: the 3 petal idle frames, the bee, and the current face
+// set (3 frames, reloaded every two hours). Fall frames are loaded one at a
+// time only while the top-of-hour drop plays — keeping all three alongside
+// a repaint's clones has blown the heap before.
+const petalFrames = petalIds.map(id => new Poco.PebbleDrawCommandImage(id));
+const beeDCI = beeId ? new Poco.PebbleDrawCommandImage(beeId) : null;
+const P_PX   = petalFrames.map(f => f.width >> 1);
+const P_PY   = petalFrames.map(f => f.height);
+const BEE_PX = beeDCI ? beeDCI.width  >> 1 : 0;
+const BEE_PY = beeDCI ? beeDCI.height >> 1 : 0;
+
+// Face sets keyed by petals remaining: set 0 = 12 & 11 left (hours 1-2),
+// set 1 = 10 & 9 (hours 3-4), ... set 5 = 2 & 1 left (hours 11-12).
+let faceSet = [], faceSetIdx = -2;
+function loadFaceSet(h12) {
+    const nSets = (faceIds.length / 3) | 0;
+    let si = (h12 - 1) >> 1;
+    if (si >= nSets) si = nSets - 1;
+    if (si === faceSetIdx) return;
+    faceSetIdx = si;
+    faceSet = [];                        // release the old set before loading
+    if (si < 0) {                        // fewer than 3 face images in build
+        if (faceIds.length) faceSet.push(new Poco.PebbleDrawCommandImage(faceIds[0]));
+        return;
+    }
+    for (let f = 0; f < 3; f++)
+        faceSet.push(new Poco.PebbleDrawCommandImage(faceIds[si * 3 + f]));
+}
 
 // Weather icon resource IDs — loaded lazily at draw time
 const WX_IDS = {
@@ -93,12 +118,69 @@ const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV
 let weather      = null;
 let lastDate     = new Date();
 let currentH12   = (lastDate.getHours() % 12) || 12;
-let tugPhase     = 0, tugTimer = null;   // drives the ~1fps current-petal pulse
 let useFahrenheit = true;
 try {
     const s = localStorage.getItem("settings");
     if (s) useFahrenheit = JSON.parse(s).useFahrenheit !== false;
 } catch(e) {}
+
+// ── Animation ─────────────────────────────────────────────────
+// To save battery, the face only animates for a short window after a wrist
+// flick / tap (accelerometer tap event — the Pebble battery-conservation
+// pattern). Idle = static frame 0, repainted on the minute.
+const TICK_MS    = 250;    // animation timebase
+const ANIM_TICKS = 32;     // ~8s window per flick/tap
+const FACE_TICKS = 4;      // face frame advances ~1x/sec
+// Per-petal frame period in ticks (2..6 = 0.5s..1.5s). Neighbours (incl. 12
+// next to 1) always differ, so adjacent petals visibly run out of step; the
+// +pos phase in petalFrameIdx desyncs petals that share a period.
+const PETAL_TICKS = [4,2,5,3,6,2,4,6,3,5,2,5];
+let tickCount = 0, animLeft = 0, animTimer = null;
+let accel = null;          // keep the instance alive — GC would unsubscribe tap
+
+function petalFrameIdx(pos) {
+    if (!animLeft || petalFrames.length < 2) return 0;
+    return (((tickCount / PETAL_TICKS[pos - 1]) | 0) + pos) % petalFrames.length;
+}
+
+function animTick() {
+    tickCount++;
+    if (--animLeft <= 0) {     // window over: stop the timer; this last
+        Timer.clear(animTimer); // draw paints the resting (frame 0) state
+        animTimer = null;
+        animLeft = 0;
+    }
+    drawScreen();
+}
+
+function startAnim() {
+    animLeft = ANIM_TICKS;
+    if (!animTimer) animTimer = Timer.repeat(animTick, TICK_MS);
+}
+
+// ── Petal fall (top of the hour) ──────────────────────────────
+// The petal that just vanished plays the 3 fall frames at its position,
+// one frame resident at a time.
+const FALL_MS = 400;
+let fallDCI = null, fallPos = 0, fallStep = 0, fallTimer = null;
+
+function startFall(pos) {
+    if (!fallIds.length) return;
+    fallPos  = pos;
+    fallStep = 0;
+    fallDCI  = loadDCI(fallIds[0]);
+    if (fallTimer) Timer.clear(fallTimer);
+    fallTimer = Timer.repeat(() => {
+        fallStep++;
+        if (fallStep >= fallIds.length) {
+            Timer.clear(fallTimer);
+            fallTimer = null;
+            fallDCI   = null;            // petal has fallen
+        }
+        else fallDCI = loadDCI(fallIds[fallStep]);
+        drawScreen();
+    }, FALL_MS);
+}
 
 // ── Petal visibility ──────────────────────────────────────────
 // pos 1 = the top (12 o'clock) petal — always present: it is the last to
@@ -228,48 +310,34 @@ function drawScreen(event) {
     }
     render.end();
 
-    // Layer 2: petals. The current-hour petal (pos = currentH12 + 1) animates
-    // the pull-off sequence; the rest reuse ONE base-petal clone, rotated to
-    // each angle (re-cloning per petal would churn too much memory at 1fps).
-    if (petalDCI) {
+    // Layer 2: petals. Each visible petal shows one of the 3 idle frames
+    // (per-petal rate/phase; frame 0 outside the animation window). One
+    // clone per frame IMAGE in use — not per petal: petals sharing a frame
+    // reuse its clone, rotated incrementally to each position (per-petal
+    // clones would churn too much memory per repaint).
+    if (petalFrames.length) {
         const STEP   = 30 * Math.PI / 180;
-        const curPos = currentH12 + 1;           // current-hour petal (>12 => none, at 12:00)
-        // Current-hour petal plays the pull-off SEQUENCE: frame 1 is the resting
-        // petal (base), then the pull frames, ping-ponged ~1/sec (base -> pull2
-        // -> pull3 -> pull2 -> base). Clones are tiny (~2KB), so 1fps cloning is
-        // fine. LIFT is 0 — the pull frames are drawn to originate at the center.
-        const seq = pullFrames.length ? [petalDCI].concat(pullFrames) : [petalDCI];
-        let curImg = petalDCI;
-        if (curPos <= 12 && seq.length > 1) {
-            const n = seq.length, period = 2 * (n - 1);
-            const ph = ((tugPhase % period) + period) % period;
-            curImg = seq[ph < n ? ph : period - ph];
-        }
-        const LIFT = 0;                          // no lift — the pull frames animate from the center, like the other petals
-        const ca   = (curPos - 1) * STEP;        // outward direction of that petal
-        const lx   = (curPos <= 12) ? Math.round(Math.sin(ca)  * LIFT) : 0;
-        const ly   = (curPos <= 12) ? Math.round(-Math.cos(ca) * LIFT) : 0;
-
-        let pd = null, pdAngle = 0;
+        const clones = [null, null, null], angles = [0, 0, 0];
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos)) continue;
+            const fi = petalFrameIdx(pos);
             const ar = -(pos - 1) * STEP;
-            if (pos === curPos) {
-                // current-hour petal: this frame of the sequence, centered on
-                // its own width (frames may be 50w vs the 60w base), lifted out.
-                const px = curImg.width >> 1, py = curImg.height;
-                const cur = curImg.clone().rotate(ar, px, py);
-                render.begin();
-                render.drawDCI(cur, CX - px + lx, CY - py + ly);
-                render.end();
-                continue;
-            }
-            // base petal for the rest (one shared clone, rotated by delta)
-            if (!pd) pd = petalDCI.clone().rotate(ar, PETAL_PX, PETAL_PY);
-            else     pd.rotate(ar - pdAngle, PETAL_PX, PETAL_PY);
-            pdAngle = ar;
+            let pd = clones[fi];
+            if (!pd) pd = clones[fi] = petalFrames[fi].clone().rotate(ar, P_PX[fi], P_PY[fi]);
+            else     pd.rotate(ar - angles[fi], P_PX[fi], P_PY[fi]);
+            angles[fi] = ar;
             render.begin();
-            render.drawDCI(pd, CX - PETAL_PX, CY - PETAL_PY);
+            render.drawDCI(pd, CX - P_PX[fi], CY - P_PY[fi]);
+            render.end();
+        }
+        // The petal that dropped at the top of this hour, mid-fall. Frames
+        // may be a different size than the petals (~50x130), so center on
+        // their own bottom-center anchor.
+        if (fallDCI) {
+            const px = fallDCI.width >> 1, py = fallDCI.height;
+            const fd = fallDCI.clone().rotate(-(fallPos - 1) * STEP, px, py);
+            render.begin();
+            render.drawDCI(fd, CX - px, CY - py);
             render.end();
         }
     }
@@ -281,8 +349,14 @@ function drawScreen(event) {
     const beeY     = Math.round(CY - BEE_R * Math.cos(beeAngle));
     const bd = beeDCI ? beeDCI.clone().rotate(Math.PI - beeAngle, BEE_PX, BEE_PY) : null;
 
+    // Face: current set's frame, advancing ~1x/sec during the animation
+    // window (resident — drawn straight from the set, no clone).
+    const face = faceSet.length
+        ? faceSet[(animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0]
+        : null;
+
     render.begin();
-    if (faceDCI) render.drawDCI(faceDCI, CX - (faceDCI.width >> 1), CY - (faceDCI.height >> 1));
+    if (face) render.drawDCI(face, CX - (face.width >> 1), CY - (face.height >> 1));
     if (bd) render.drawDCI(bd, beeX - BEE_PX, beeY - BEE_PY);
 
     let w, a;
@@ -330,25 +404,27 @@ function drawScreen(event) {
   }
 }
 
-// ── Current-petal pulse driver (~1fps) ────────────────────────
-// Now affordable: the shrunk PDCs make a repaint's clones ~3.6KB, so 1fps
-// cloning no longer outruns GC. Skips the repaint at 12 o'clock (lone petal).
-function animateTug() {
-    tugPhase++;
-    if (currentH12 < 12) drawScreen();
-    tugTimer = Timer.set(animateTug, 1000);
-}
-
 // ── App behavior ──────────────────────────────────────────────
 class AppBehavior extends Behavior {
     onDisplaying(application) {
         loadCachedWeather();
+        loadFaceSet(currentH12);
         drawScreen();
         requestLocation();
-        if (!tugTimer) tugTimer = Timer.set(animateTug, 1000);
+
+        // Wrist flick / tap → one short animation window. Created once and
+        // kept for the app's life (the runtime allows only one instance;
+        // close+reopen of sensors has proven fatal — see requestLocation).
+        try { accel = new Accelerometer({ onTap: startAnim }); } catch(e) {}
+        startAnim();    // launching the face means the user is looking
 
         watch.addEventListener("minutechange", clock => {
-            currentH12 = (clock.date.getHours() % 12) || 12;
+            const h = (clock.date.getHours() % 12) || 12;
+            if (h !== currentH12) {
+                currentH12 = h;
+                loadFaceSet(h);              // sets switch on odd hours
+                if (h !== 1) startFall(h);   // at 1:00 the flower reblooms — nothing falls
+            }
             drawScreen(clock);
         });
 
