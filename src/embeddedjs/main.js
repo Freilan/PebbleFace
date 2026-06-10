@@ -102,15 +102,39 @@ function loadDCI(id) {
     catch(e) { return null; }
 }
 
-let rotation = 0;
-for (let id = 1; id <= N_MEDIA; id++) {
-    if (!loadDCI(id)) {       // the one non-PDC = icon.png = media 26
-        rotation = (id - ICON_MEDIA + N_MEDIA) % N_MEDIA;
-        break;
-    }
-}
+// The rotation is fixed per BUILD, so cache it across launches and verify
+// it structurally: with the right rotation rid(ICON_MEDIA) must FAIL to
+// load; under a stale rotation (new build) that id loads a real PDC and we
+// re-probe. This matters because a full probe decodes every PDC it touches
+// onto the app heap and the constructor's WeakRef id-cache pins them until
+// a later job's GC — a ~28KB spike that once starved the heap into a
+// crash-reload loop. Steady launches cost zero probe decodes.
+let rotation = -1;
 // id of the 1-based media entry m under this build's rotation
 function rid(m) { return ((m - 1 + rotation) % N_MEDIA) + 1; }
+try {
+    const r = localStorage.getItem("rotation");
+    if (r !== null) rotation = Number(r);
+} catch(e) {}
+if (rotation >= 0 && loadDCI(rid(ICON_MEDIA)))
+    rotation = -1;                  // that id loaded => rotation is stale
+if (rotation < 0) {
+    for (let id = 1; id <= N_MEDIA; id++) {
+        if (!loadDCI(id)) {         // the one non-PDC = icon.png = media 26
+            rotation = (id - ICON_MEDIA + N_MEDIA) % N_MEDIA;
+            break;
+        }
+    }
+    if (rotation < 0) rotation = 0; // can't happen; keep rid() in range
+    try { localStorage.setItem("rotation", String(rotation)); } catch(e) {}
+    // Release the probe's pinned decodes ASAP: from a fresh job (WeakRef
+    // targets are only collectable after the creating job ends), apply
+    // chunk pressure in small steps until the GC runs. Small buffers so a
+    // single ask can never exceed the fixed chunk pool (which would abort).
+    Timer.set(() => {
+        try { for (let i = 0; i < 4; i++) new ArrayBuffer(4096); } catch(e) {}
+    });
+}
 
 // Resident images: the 3 petal idle frames, the bee, and the current face
 // set (2 frames, reloaded every two hours). Fall frames are loaded one at a
@@ -130,11 +154,12 @@ const P_PY   = petalFrames.map(f => f.height);
 const BEE_PX = beeDCI ? beeDCI.width  >> 1 : 0;
 const BEE_PY = beeDCI ? beeDCI.height >> 1 : 0;
 
-// Face sets keyed by petals remaining: set 0 = 12 & 11 left (hours 1-2),
-// set 1 = 10 & 9 (hours 3-4), ... set 5 = 2 & 1 left (hours 11-12).
+// Face sets are named for the CLOCK HOURS they show: face_2_1 covers 1 & 2
+// o'clock ... face_12_11 covers 11 & 12. Media order runs face_12_11 (set
+// index 0) down to face_2_1 (5), so the hour maps in reverse.
 let faceSet = [], faceSetIdx = -1;
 function loadFaceSet(h12) {
-    let si = (h12 - 1) >> 1;
+    let si = (12 - h12) >> 1;
     if (si >= N_SETS) si = N_SETS - 1;
     if (si === faceSetIdx) return;
     faceSetIdx = si;
