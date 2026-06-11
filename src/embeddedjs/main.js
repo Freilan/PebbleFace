@@ -10,6 +10,7 @@ import Location from "embedded:sensor/Location";
 import Accelerometer from "embedded:sensor/Accelerometer";
 import Message from "pebble/message";
 import Instrumentation from "instrumentation";
+import FFI from "ffi";
 
 // ── Startup memory diagnostics (TEMPORARY — strip when stable) ──
 // Dumps every XS instrumentation counter (chunk/slot heap, system free,
@@ -84,74 +85,42 @@ function petalAnchor(clockDeg) {
 }
 
 // ── Resources ─────────────────────────────────────────────────
-// Resource ids are assigned by the build's resource-ball order, which is a
-// random ROTATION of the package.json media order — the offset changes from
-// build to build (observed 0, 12, 17), with the MOD archive always last
-// (id 27). So ids can be neither hardcoded nor taken from size classes in
-// id order (a class can wrap around the rotation seam). The anchor that
-// reveals the offset must not depend on the ART: identifying the bee by
-// its viewbox broke the moment the weather icons were redrawn at 40x40
-// (the probe anchored on icon_clear and every id came out 4 slots off).
-// The one content-independent anchor is icon.png — the only media entry
-// that is not a PDC, hence the only id in 1..26 that fails to load as a
-// draw-command image. (Ids past the table hard-fault; 1..26 all exist.)
-// Probed images are dropped immediately (decoding costs app heap until GC).
-// Constants are 1-based package.json media POSITIONS — keep in sync.
-const N_MEDIA     = 26;             // media entries (icon.png last)
-const WX_MEDIA = {                  // weather icons, loaded lazily at draw
-    "Cloudy":    1,
-    "P. Cloudy": 2,
-    "Clear":     3,
-    "Rain":      4,
-    "Snow":      5,
-    "Storm":     6,
+// Resource ids are assigned by the build's resource-ball order, which is
+// NOT deterministic across builds — observed: exact media order, rotations
+// of it, near-alphabetical. No order- or art-based probe survived five
+// builds. The build itself is the only authority: mdbl.c snapshots the
+// generated RESOURCE_ID_* defines and hands them over through the FFI
+// hook, so the ids here are compile-time-correct for THIS build, always.
+// Table layout (must match s_resource_ids in src/c/mdbl.c):
+const R_PETAL = 0;     // petal_1..3
+const R_FALL  = 3;     // petal_fall_1..3
+const R_FACE  = 6;     // 6 sets x 2 frames, set-major: 12_11 .. 2_1
+const R_BEE   = 18;
+const R_WX    = 19;    // cloudy, pcloudy, clear, rain, snow, storm
+const FACE_FRAMES = 2; // frames per face set
+const N_SETS  = 6;
+const WX_OFFSET = {    // weather desc -> offset from R_WX
+    "Cloudy":    0,
+    "P. Cloudy": 1,
+    "Clear":     2,
+    "Rain":      3,
+    "Snow":      4,
+    "Storm":     5,
 };
-const PETAL_MEDIA = 7;              // petal_1..3: idle frames
-const FALL_MEDIA  = 10;             // petal_fall_1..3: top-of-hour sequence
-const FACE_MEDIA  = 13;             // face_12_11_1 .. face_2_1_2, set-major
-const FACE_FRAMES = 2;              // frames per face set
-const N_SETS      = 6;
-const BEE_MEDIA   = 25;
-const ICON_MEDIA  = 26;             // menu icon.png (not loadable as PDC)
+
+let RES = null;
+try { RES = new Uint8Array(new FFI().ids); } catch(e) {}
+if (!RES || RES.length < 25) {
+    // Would mean the FFI hook vanished from mdbl.c — media order is the
+    // least-wrong guess, but expect scrambled art until the hook returns.
+    trace("[RES] FFI id table unavailable; falling back to media order\n");
+    RES = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+           19, 20, 21, 22, 23, 24, 25, 1, 2, 3, 4, 5, 6];
+}
 
 function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
-}
-
-// The rotation is fixed per BUILD, so cache it across launches and verify
-// it structurally: with the right rotation rid(ICON_MEDIA) must FAIL to
-// load; under a stale rotation (new build) that id loads a real PDC and we
-// re-probe. This matters because a full probe decodes every PDC it touches
-// onto the app heap and the constructor's WeakRef id-cache pins them until
-// a later job's GC — a ~28KB spike that once starved the heap into a
-// crash-reload loop. Steady launches cost zero probe decodes.
-let rotation = -1;
-// id of the 1-based media entry m under this build's rotation
-function rid(m) { return ((m - 1 + rotation) % N_MEDIA) + 1; }
-try {
-    const r = localStorage.getItem("rotation");
-    if (r !== null) rotation = Number(r);
-} catch(e) {}
-if (rotation >= 0 && loadDCI(rid(ICON_MEDIA)))
-    rotation = -1;                  // that id loaded => rotation is stale
-if (rotation < 0) {
-    for (let id = 1; id <= N_MEDIA; id++) {
-        if (!loadDCI(id)) {         // the one non-PDC = icon.png = media 26
-            rotation = (id - ICON_MEDIA + N_MEDIA) % N_MEDIA;
-            break;
-        }
-    }
-    if (rotation < 0) rotation = 0; // can't happen; keep rid() in range
-    try { localStorage.setItem("rotation", String(rotation)); } catch(e) {}
-    // Release the probe's pinned decodes ASAP: from a fresh job (WeakRef
-    // targets are only collectable after the creating job ends), apply
-    // chunk pressure in small steps until the GC runs. Buffers stay small
-    // relative to the 10KB chunk pool: an ask that can't fit even after
-    // GC aborts the app rather than throwing.
-    Timer.set(() => {
-        try { for (let i = 0; i < 5; i++) new ArrayBuffer(2048); } catch(e) {}
-    });
 }
 
 // Resident images: the 3 petal idle frames, the bee, and the current face
@@ -160,12 +129,12 @@ if (rotation < 0) {
 // a repaint's clones has blown the heap before.
 const petalFrames = [];
 for (let i = 0; i < 3; i++) {
-    const f = loadDCI(rid(PETAL_MEDIA + i));
+    const f = loadDCI(RES[R_PETAL + i]);
     if (f) petalFrames.push(f);
 }
 if (!petalFrames.length || petalFrames[0].height < 100 || petalFrames[0].width < 55)
-    trace("[RES] rotation mapping looks wrong (petal_1 isn't ~60x130)\n");
-const beeDCI = loadDCI(rid(BEE_MEDIA));
+    trace("[RES] id table looks wrong (petal_1 isn't ~60x130)\n");
+const beeDCI = loadDCI(RES[R_BEE]);
 memReport("load:art");
 const P_PX   = petalFrames.map(f => f.width >> 1);
 const P_PY   = petalFrames.map(f => f.height);
@@ -183,7 +152,7 @@ function loadFaceSet(h12) {
     faceSetIdx = si;
     faceSet = [];                        // release the old set before loading
     for (let f = 0; f < FACE_FRAMES; f++) {
-        const img = loadDCI(rid(FACE_MEDIA + si * FACE_FRAMES + f));
+        const img = loadDCI(RES[R_FACE + si * FACE_FRAMES + f]);
         if (img) faceSet.push(img);
     }
 }
@@ -256,7 +225,7 @@ let fallDCI = null, fallPos = 0, fallStep = 0, fallTimer = null;
 function startFall(pos) {
     fallPos  = pos;
     fallStep = 0;
-    fallDCI  = loadDCI(rid(FALL_MEDIA));
+    fallDCI  = loadDCI(RES[R_FALL]);
     if (fallTimer) Timer.clear(fallTimer);
     fallTimer = Timer.repeat(() => {
         fallStep++;
@@ -265,7 +234,7 @@ function startFall(pos) {
             fallTimer = null;
             fallDCI   = null;            // petal has fallen
         }
-        else fallDCI = loadDCI(rid(FALL_MEDIA + fallStep));
+        else fallDCI = loadDCI(RES[R_FALL + fallStep]);
         drawScreen();
     }, FALL_MS);
 }
@@ -504,9 +473,9 @@ function drawScreen(event) {
     // replacing the old text label (e.g. "Cloudy"). Centered on the anchor.
     a = petalAnchor(90);
     if (weather) {
-        const iconMedia = WX_MEDIA[weather.desc];
-        if (iconMedia !== undefined) {
-            const icon = loadDCI(rid(iconMedia));
+        const wx = WX_OFFSET[weather.desc];
+        if (wx !== undefined) {
+            const icon = loadDCI(RES[R_WX + wx]);
             if (icon) render.drawDCI(icon,
                 a.x - (icon.width  >> 1),
                 a.y - (icon.height >> 1));
