@@ -10,7 +10,6 @@ import Location from "embedded:sensor/Location";
 import Accelerometer from "embedded:sensor/Accelerometer";
 import Message from "pebble/message";
 import Instrumentation from "instrumentation";
-import FFI from "ffi";
 
 // ── Startup memory diagnostics (TEMPORARY — strip when stable) ──
 // Dumps every XS instrumentation counter (chunk/slot heap, system free,
@@ -91,6 +90,9 @@ function petalAnchor(clockDeg) {
 // builds. The build itself is the only authority: mdbl.c snapshots the
 // generated RESOURCE_ID_* defines and hands them over through the FFI
 // hook, so the ids here are compile-time-correct for THIS build, always.
+// The host constructs `new FFI()` itself (running mdbl.c's hook, which
+// defines .ids on that instance) and injects it into the mod's globals as
+// `Natives` — the "ffi" module is NOT importable from a mod.
 // Table layout (must match s_resource_ids in src/c/mdbl.c):
 const R_PETAL = 0;     // petal_1..3
 const R_FALL  = 3;     // petal_fall_1..3
@@ -109,7 +111,7 @@ const WX_OFFSET = {    // weather desc -> offset from R_WX
 };
 
 let RES = null;
-try { RES = new Uint8Array(new FFI().ids); } catch(e) {}
+try { RES = new Uint8Array(Natives.ids); } catch(e) {}
 if (!RES || RES.length < 25) {
     // Would mean the FFI hook vanished from mdbl.c — media order is the
     // least-wrong guess, but expect scrambled art until the hook returns.
