@@ -92,19 +92,61 @@ const WX_OFFSET = {    // weather desc -> offset from R_WX
     "Storm":     5,
 };
 
-let RES = null;
-try { RES = new Uint8Array(Natives.ids); } catch(e) {}
-if (!RES || RES.length < 25) {
-    // Would mean the FFI hook vanished from mdbl.c — media order is the
-    // least-wrong guess, but expect scrambled art until the hook returns.
-    trace("[RES] FFI id table unavailable; falling back to media order\n");
-    RES = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-           19, 20, 21, 22, 23, 24, 25, 1, 2, 3, 4, 5, 6];
-}
-
 function loadDCI(id) {
     try { return new Poco.PebbleDrawCommandImage(id); }
     catch(e) { return null; }
+}
+
+let RES = null;
+try { RES = new Uint8Array(Natives.ids); } catch(e) {}
+if (!RES || RES.length < 25) {
+    // FFI table unavailable (firmware may predate the fxBuildFFI hook).
+    // Identify resources by viewbox FINGERPRINT instead: every PDC in the
+    // repo carries a unique (width, height), stamped by tools/tag_pdcs.py
+    // (re-run it whenever art is added/replaced; keep its table in sync
+    // with FP below). The mapping is fixed per build, so cache it and
+    // verify two anchors each launch; a new build fails the check and
+    // rescans.
+    try {
+        const c = JSON.parse(localStorage.getItem("resmap"));
+        if (c && c.length >= 25) RES = c;
+    } catch(e) {}
+    if (RES) {
+        const p = loadDCI(RES[0]), b = loadDCI(RES[18]);
+        if (!p || p.width !== 60 || p.height !== 130 ||
+            !b || b.width !== 50 || b.height !== 50)
+            RES = null;                       // stale build — rescan
+    }
+    if (!RES) {
+        trace("[RES] fingerprint scan\n");
+        const FP = {};                        // (w<<8)|h -> table index
+        for (let i = 0; i < 3; i++) FP[((60 + i) << 8) | 130] = R_PETAL + i;
+        for (let i = 0; i < 3; i++) FP[((50 + i) << 8) | 130] = R_FALL + i;
+        for (let s = 0; s < 6; s++)
+            for (let f = 0; f < 2; f++)
+                FP[((104 + s) << 8) | (106 + f)] = R_FACE + s * 2 + f;
+        FP[(50 << 8) | 50] = R_BEE;
+        FP[(24 << 8) | 18] = R_WX;            // cloudy
+        FP[(24 << 8) | 25] = R_WX + 1;        // pcloudy
+        FP[(40 << 8) | 40] = R_WX + 2;        // clear
+        FP[(24 << 8) | 26] = R_WX + 3;        // rain
+        FP[(41 << 8) | 40] = R_WX + 4;        // snow
+        FP[(42 << 8) | 40] = R_WX + 5;        // storm
+        RES = new Array(25).fill(1);
+        for (let id = 1; id <= 26; id++) {    // 26 = icon.png, fails; never
+            const dci = loadDCI(id);          // scan past the table (faults)
+            if (!dci) continue;
+            const idx = FP[(dci.width << 8) | dci.height];
+            if (idx !== undefined) RES[idx] = id;
+        }
+        try { localStorage.setItem("resmap", JSON.stringify(RES)); } catch(e) {}
+        // The scan's decodes sit on the app heap, WeakRef-pinned until
+        // this job ends — free them from a fresh job via chunk pressure
+        // (small asks only: an over-pool chunk ask aborts).
+        Timer.set(() => {
+            try { for (let i = 0; i < 6; i++) new ArrayBuffer(2048); } catch(e) {}
+        });
+    }
 }
 
 // Resident images: the 3 petal idle frames, the bee, and the current face
