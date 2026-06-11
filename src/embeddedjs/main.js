@@ -105,17 +105,31 @@ if (!RES || RES.length < 25) {
     // repo carries a unique (width, height), stamped by tools/tag_pdcs.py
     // (re-run it whenever art is added/replaced; keep its table in sync
     // with FP below). The mapping is fixed per build, so cache it and
-    // verify two anchors each launch; a new build fails the check and
-    // rescans.
+    // verify anchors each launch; a new build fails the check and rescans.
+    // Key is "resmap2": v1 maps were validated by petal_1+bee alone, which
+    // let stale FACE ids through (wrong face art on screen) — the bump
+    // discards every v1 cache in the wild.
     try {
-        const c = JSON.parse(localStorage.getItem("resmap"));
+        const c = JSON.parse(localStorage.getItem("resmap2"));
         if (c && c.length >= 25) RES = c;
     } catch(e) {}
     if (RES) {
-        const p = loadDCI(RES[0]), b = loadDCI(RES[18]);
-        if (!p || p.width !== 60 || p.height !== 130 ||
-            !b || b.width !== 50 || b.height !== 50)
-            RES = null;                       // stale build — rescan
+        // One anchor per art block — petal, fall, the face block's two
+        // ENDS, and the bee. Rebuilds reorder ids in blocks/rotations, so
+        // endpoint drift catches the shifts the old 2-anchor check missed
+        // (petal_1+bee can hold position while the face block moves).
+        const chk = [
+            [0,   60, 130],   // petal_1
+            [3,   50, 130],   // petal_fall_1
+            [6,  104, 106],   // face_12_11_1 (face block start)
+            [17, 109, 107],   // face_2_1_2   (face block end)
+            [18,  50,  50],   // bee
+        ];
+        for (let i = 0; RES && i < chk.length; i++) {
+            const d = loadDCI(RES[chk[i][0]]);
+            if (!d || d.width !== chk[i][1] || d.height !== chk[i][2])
+                RES = null;                   // stale build — rescan
+        }
     }
     if (!RES) {
         trace("[RES] fingerprint scan\n");
@@ -139,14 +153,14 @@ if (!RES || RES.length < 25) {
             const idx = FP[(dci.width << 8) | dci.height];
             if (idx !== undefined) RES[idx] = id;
         }
-        try { localStorage.setItem("resmap", JSON.stringify(RES)); } catch(e) {}
-        // The scan's decodes sit on the app heap, WeakRef-pinned until
-        // this job ends — free them from a fresh job via chunk pressure
-        // (small asks only: an over-pool chunk ask aborts).
-        Timer.set(() => {
-            try { for (let i = 0; i < 6; i++) new ArrayBuffer(2048); } catch(e) {}
-        });
+        try { localStorage.setItem("resmap2", JSON.stringify(RES)); } catch(e) {}
     }
+    // The scan/anchor decodes sit on the app heap, WeakRef-pinned until
+    // this job ends — free them from a fresh job via chunk pressure
+    // (small asks only: an over-pool chunk ask aborts).
+    Timer.set(() => {
+        try { for (let i = 0; i < 6; i++) new ArrayBuffer(2048); } catch(e) {}
+    });
 }
 
 // Resident images: the 3 petal idle frames, the bee, and the current face
@@ -180,7 +194,17 @@ function loadFaceSet(count) {
     faceSet = [];                        // release the old set before loading
     for (let f = 0; f < FACE_FRAMES; f++) {
         const img = loadDCI(RES[R_FACE + si * FACE_FRAMES + f]);
-        if (img) faceSet.push(img);
+        if (!img) continue;
+        // Self-check: face art is stamped (104+set)x(106+frame). A mismatch
+        // means the cached id map is stale in a way the boot anchors missed
+        // (only middle face slots moved) — drop the cache so the next launch
+        // rescans. Keep drawing the wrong-but-loadable art meanwhile; a
+        // blank face would be worse.
+        if (img.width !== 104 + si || img.height !== 106 + f) {
+            trace("[RES] face set ", si, " frame ", f, " has wrong art — resmap stale, will rescan\n");
+            try { localStorage.setItem("resmap2", "[]"); } catch(e) {}
+        }
+        faceSet.push(img);
     }
 }
 
