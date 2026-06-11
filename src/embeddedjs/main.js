@@ -166,12 +166,14 @@ const P_PY   = petalFrames.map(f => f.height);
 const BEE_PX = beeDCI ? beeDCI.width  >> 1 : 0;
 const BEE_PY = beeDCI ? beeDCI.height >> 1 : 0;
 
-// Face sets are named for the CLOCK HOURS they show: face_2_1 covers 1 & 2
-// o'clock ... face_12_11 covers 11 & 12. Media order runs face_12_11 (set
-// index 0) down to face_2_1 (5), so the hour maps in reverse.
+// Face sets are named for the PETALS REMAINING they cover: face_12_11 shows
+// while 12 or 11 petals are up ... face_2_1 while 2 or 1 are. Media order
+// runs face_12_11 (set index 0) down to face_2_1 (5), so the count maps in
+// reverse. There is no bare-flower set, so the midnight hour (0 petals)
+// keeps face_2_1 (the clamp below).
 let faceSet = [], faceSetIdx = -1;
-function loadFaceSet(h12) {
-    let si = (12 - h12) >> 1;
+function loadFaceSet(count) {
+    let si = (12 - count) >> 1;
     if (si >= N_SETS) si = N_SETS - 1;
     if (si === faceSetIdx) return;
     faceSetIdx = si;
@@ -292,6 +294,12 @@ function petalVisible(pos) {
     if (h === 12) return true;                     // noon — full bloom
     if (h < 12)   return pos >= 2 && pos <= h + 1; // AM: o'clock petals 1..h have bloomed
     return pos >= h - 11;                          // PM: o'clock petals (h-12)..11 remain
+}
+
+// Petals on screen this hour — drives which face set shows.
+function petalCount() {
+    const h = currentH24;
+    return h === 12 ? 12 : (h < 12 ? h : 24 - h);
 }
 
 // ── Weather ───────────────────────────────────────────────────
@@ -536,7 +544,7 @@ class AppBehavior extends Behavior {
         openMessageChannel();
 
         loadCachedWeather();
-        loadFaceSet((currentH24 % 12) || 12);   // face sets follow the 12-hour clock
+        loadFaceSet(petalCount());   // face tracks how many petals remain
         drawScreen();
         requestLocation();
         startAnim();    // launching the face means the user is looking
@@ -545,7 +553,7 @@ class AppBehavior extends Behavior {
             const h = clock.date.getHours();
             if (h !== currentH24) {
                 currentH24 = h;
-                loadFaceSet((h % 12) || 12);     // face sets still follow the 12-hour clock
+                loadFaceSet(petalCount());       // face tracks how many petals remain
                 // A petal falls only on PM transitions: the 12 o'clock petal
                 // (pos 1) at 1PM … the 10 o'clock (pos 11) at 11PM, and the
                 // 11 o'clock (pos 12) at midnight. AM transitions bloom a
