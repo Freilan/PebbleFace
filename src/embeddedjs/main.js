@@ -189,7 +189,7 @@ const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV
 // ── State ─────────────────────────────────────────────────────
 let weather      = null;
 let lastDate     = new Date();
-let currentH12   = (lastDate.getHours() % 12) || 12;
+let currentH24   = lastDate.getHours();   // 0..23 — drives the bloom cycle
 let useFahrenheit = true;
 try {
     const s = localStorage.getItem("settings");
@@ -241,9 +241,10 @@ function startAnim() {
     if (!animTimer) animTimer = Timer.repeat(animTick, TICK_MS);
 }
 
-// ── Petal fall (top of the hour) ──────────────────────────────
+// ── Petal fall (top of PM hours) ──────────────────────────────
 // The petal that just vanished plays the 3 fall frames at its position,
-// one frame resident at a time.
+// one frame resident at a time. Petals fall only through the PM half of the
+// bloom cycle (1PM .. midnight); AM petals bloom in with no fall.
 const FALL_MS = 400;
 let fallDCI = null, fallPos = 0, fallStep = 0, fallTimer = null;
 
@@ -278,12 +279,19 @@ function openMessageChannel() {
 }
 
 // ── Petal visibility ──────────────────────────────────────────
-// pos 1 = the top (12 o'clock) petal — always present: it is the last to
-// remain and reblooms at 1:00. The other 11 fall one per hour starting at the
-// 1 o'clock petal and going clockwise, so at 1:00 the flower is full and at
-// 12:00 only the top petal is left.
+// A 24-hour bloom cycle keyed off the hour (currentH24, 0..23). pos 1 is the
+// top (12 o'clock) petal; pos k (k=2..12) is the (k-1) o'clock petal.
+//   Midnight:  bare — no petals.
+//   AM (gain): one petal blooms each hour — the 1 o'clock petal at 1:00, the
+//              2 o'clock at 2:00 … the 11 o'clock at 11:00.
+//   Noon:      the 12 o'clock petal blooms too — full flower, all 12 showing.
+//   PM (shed): one petal falls each hour — the 12 o'clock petal at 1:00, the
+//              1 o'clock at 2:00 … the 11 o'clock at midnight, looping to bare.
 function petalVisible(pos) {
-    return pos === 1 || pos > currentH12;
+    const h = currentH24;                          // 0..23
+    if (h === 12) return true;                     // noon — full bloom
+    if (h < 12)   return pos >= 2 && pos <= h + 1; // AM: o'clock petals 1..h have bloomed
+    return pos >= h - 11;                          // PM: o'clock petals (h-12)..11 remain
 }
 
 // ── Weather ───────────────────────────────────────────────────
@@ -528,17 +536,22 @@ class AppBehavior extends Behavior {
         openMessageChannel();
 
         loadCachedWeather();
-        loadFaceSet(currentH12);
+        loadFaceSet((currentH24 % 12) || 12);   // face sets follow the 12-hour clock
         drawScreen();
         requestLocation();
         startAnim();    // launching the face means the user is looking
 
         watch.addEventListener("minutechange", clock => {
-            const h = (clock.date.getHours() % 12) || 12;
-            if (h !== currentH12) {
-                currentH12 = h;
-                loadFaceSet(h);              // sets switch on odd hours
-                if (h !== 1) startFall(h);   // at 1:00 the flower reblooms — nothing falls
+            const h = clock.date.getHours();
+            if (h !== currentH24) {
+                currentH24 = h;
+                loadFaceSet((h % 12) || 12);     // face sets still follow the 12-hour clock
+                // A petal falls only on PM transitions: the 12 o'clock petal
+                // (pos 1) at 1PM … the 10 o'clock (pos 11) at 11PM, and the
+                // 11 o'clock (pos 12) at midnight. AM transitions bloom a
+                // petal in — nothing falls.
+                if (h === 0)     startFall(12);
+                else if (h > 12) startFall(h - 12);
             }
             drawScreen(clock);
         });
