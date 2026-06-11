@@ -92,7 +92,7 @@ const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV
 // ── State ─────────────────────────────────────────────────────
 let weather      = null;
 let lastDate     = new Date();
-let currentH12   = (lastDate.getHours() % 12) || 12;
+let currentH24   = lastDate.getHours();   // 0..23 — drives the bloom cycle
 let tugPhase     = 0, tugTimer = null;   // drives the ~1fps current-petal pulse
 let useFahrenheit = true;
 try {
@@ -101,12 +101,19 @@ try {
 } catch(e) {}
 
 // ── Petal visibility ──────────────────────────────────────────
-// pos 1 = the top (12 o'clock) petal — always present: it is the last to
-// remain and reblooms at 1:00. The other 11 fall one per hour starting at the
-// 1 o'clock petal and going clockwise, so at 1:00 the flower is full and at
-// 12:00 only the top petal is left.
+// A 24-hour bloom cycle keyed off the hour (currentH24, 0..23). pos 1 is the
+// top (12 o'clock) petal; pos k (k=2..12) is the (k-1) o'clock petal.
+//   Midnight:  bare — no petals.
+//   AM (gain): one petal blooms each hour — the 1 o'clock petal at 1:00, the
+//              2 o'clock at 2:00 … the 11 o'clock at 11:00.
+//   Noon:      the 12 o'clock petal blooms too — full flower, all 12 showing.
+//   PM (shed): one petal falls each hour — the 12 o'clock petal at 1:00, the
+//              1 o'clock at 2:00 … the 11 o'clock at midnight, looping to bare.
 function petalVisible(pos) {
-    return pos === 1 || pos > currentH12;
+    const h = currentH24;                          // 0..23
+    if (h === 12) return true;                     // noon — full bloom
+    if (h < 12)   return pos >= 2 && pos <= h + 1; // AM: o'clock petals 1..h have bloomed
+    return pos >= h - 11;                          // PM: o'clock petals (h-12)..11 remain
 }
 
 // ── Weather ───────────────────────────────────────────────────
@@ -228,27 +235,32 @@ function drawScreen(event) {
     }
     render.end();
 
-    // Layer 2: petals. The current-hour petal (pos = currentH12 + 1) animates
-    // the pull-off sequence; the rest reuse ONE base-petal clone, rotated to
-    // each angle (re-cloning per petal would churn too much memory at 1fps).
+    // Layer 2: petals. The "about to be plucked" petal (curPos) animates the
+    // pull-off sequence; the rest reuse ONE base-petal clone, rotated to each
+    // angle (re-cloning per petal would churn too much memory at 1fps).
     if (petalDCI) {
         const STEP   = 30 * Math.PI / 180;
-        const curPos = currentH12 + 1;           // current-hour petal (>12 => none, at 12:00)
-        // Current-hour petal plays the pull-off SEQUENCE: frame 1 is the resting
+        // Only the PM half (noon..11PM) sheds a petal each hour, so only then is
+        // one being plucked: the next to fall, i.e. the lowest-index visible
+        // petal. pos = currentH24 - 11 → noon:1 (12 o'clock), 1PM:2 (1 o'clock)
+        // … 11PM:12 (11 o'clock). In the AM half petals are blooming, not being
+        // plucked, so nothing tugs (curPos = 0, which matches no pos).
+        const curPos = (currentH24 >= 12) ? currentH24 - 11 : 0;   // 0 = none
+        // The plucked petal plays the pull-off SEQUENCE: frame 1 is the resting
         // petal (base), then the pull frames, ping-ponged ~1/sec (base -> pull2
         // -> pull3 -> pull2 -> base). Clones are tiny (~2KB), so 1fps cloning is
         // fine. LIFT is 0 — the pull frames are drawn to originate at the center.
         const seq = pullFrames.length ? [petalDCI].concat(pullFrames) : [petalDCI];
         let curImg = petalDCI;
-        if (curPos <= 12 && seq.length > 1) {
+        if (curPos >= 1 && seq.length > 1) {
             const n = seq.length, period = 2 * (n - 1);
             const ph = ((tugPhase % period) + period) % period;
             curImg = seq[ph < n ? ph : period - ph];
         }
         const LIFT = 0;                          // no lift — the pull frames animate from the center, like the other petals
         const ca   = (curPos - 1) * STEP;        // outward direction of that petal
-        const lx   = (curPos <= 12) ? Math.round(Math.sin(ca)  * LIFT) : 0;
-        const ly   = (curPos <= 12) ? Math.round(-Math.cos(ca) * LIFT) : 0;
+        const lx   = (curPos >= 1) ? Math.round(Math.sin(ca)  * LIFT) : 0;
+        const ly   = (curPos >= 1) ? Math.round(-Math.cos(ca) * LIFT) : 0;
 
         let pd = null, pdAngle = 0;
         for (let pos = 12; pos >= 1; pos--) {
@@ -332,10 +344,11 @@ function drawScreen(event) {
 
 // ── Current-petal pulse driver (~1fps) ────────────────────────
 // Now affordable: the shrunk PDCs make a repaint's clones ~3.6KB, so 1fps
-// cloning no longer outruns GC. Skips the repaint at 12 o'clock (lone petal).
+// cloning no longer outruns GC. Only the PM half has a tugging petal, so the
+// repaint is skipped through the AM half (static, blooming petals).
 function animateTug() {
     tugPhase++;
-    if (currentH12 < 12) drawScreen();
+    if (currentH24 >= 12) drawScreen();   // a petal only tugs in the PM (shedding) half
     tugTimer = Timer.set(animateTug, 1000);
 }
 
@@ -348,7 +361,7 @@ class AppBehavior extends Behavior {
         if (!tugTimer) tugTimer = Timer.set(animateTug, 1000);
 
         watch.addEventListener("minutechange", clock => {
-            currentH12 = (clock.date.getHours() % 12) || 12;
+            currentH24 = clock.date.getHours();
             drawScreen(clock);
         });
 
