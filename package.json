@@ -99,6 +99,24 @@
                     "type": "raw"
                 },
                 {
+                    "file": "data/petal_grow_1.pdc",
+                    "name": "GROW_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/petal_grow_2.pdc",
+                    "name": "GROW_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/petal_grow_3.pdc",
+                    "name": "GROW_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
                     "file": "data/face_12_11_1.pdc",
                     "name": "FACE_12_11_1",
                     "targetPlatforms": null,

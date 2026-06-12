@@ -76,11 +76,13 @@ function petalAnchor(clockDeg) {
 // defines .ids on that instance) and injects it into the mod's globals as
 // `Natives` — the "ffi" module is NOT importable from a mod.
 // Table layout (must match s_resource_ids in src/c/mdbl.c):
-const R_PETAL = 0;     // petal_1..3
-const R_FALL  = 3;     // petal_fall_1..3
-const R_FACE  = 6;     // 6 sets x 2 frames, set-major: 12_11 .. 2_1
-const R_BEE   = 18;
-const R_WX    = 19;    // cloudy, pcloudy, clear, rain, snow, storm
+const R_PETAL = 0;     // petal_1..3 (idle frames)
+const R_FALL  = 3;     // petal_fall_1..3 (PM shed transition)
+const R_GROW  = 6;     // petal_grow_1..3 (AM bloom transition)
+const R_FACE  = 9;     // 6 sets x 2 frames, set-major: 12_11 .. 2_1
+const R_BEE   = 21;
+const R_WX    = 22;    // cloudy, pcloudy, clear, rain, snow, storm
+const R_LEN   = 28;    // table entries; media count is R_LEN + 1 (icon.png)
 const FACE_FRAMES = 2; // frames per face set
 const N_SETS  = 6;
 const WX_OFFSET = {    // weather desc -> offset from R_WX
@@ -99,7 +101,7 @@ function loadDCI(id) {
 
 let RES = null;
 try { RES = new Uint8Array(Natives.ids); } catch(e) {}
-if (!RES || RES.length < 25) {
+if (!RES || RES.length < R_LEN) {
     // FFI table unavailable (firmware may predate the fxBuildFFI hook).
     // Identify resources by viewbox FINGERPRINT instead: every PDC in the
     // repo carries a unique (width, height), stamped by tools/tag_pdcs.py
@@ -111,19 +113,19 @@ if (!RES || RES.length < 25) {
     // discards every v1 cache in the wild.
     try {
         const c = JSON.parse(localStorage.getItem("resmap2"));
-        if (c && c.length >= 25) RES = c;
+        if (c && c.length >= R_LEN) RES = c;
     } catch(e) {}
     if (RES) {
-        // One anchor per art block — petal, fall, the face block's two
-        // ENDS, and the bee. Rebuilds reorder ids in blocks/rotations, so
-        // endpoint drift catches the shifts the old 2-anchor check missed
-        // (petal_1+bee can hold position while the face block moves).
+        // One anchor per art block — petal, fall, grow, the face block's
+        // two ENDS, and the bee. Rebuilds reorder ids in blocks/rotations,
+        // so endpoint drift catches shifts a 2-anchor check would miss.
         const chk = [
-            [0,   60, 130],   // petal_1
-            [3,   50, 130],   // petal_fall_1
-            [6,  104, 106],   // face_12_11_1 (face block start)
-            [17, 109, 107],   // face_2_1_2   (face block end)
-            [18,  50,  50],   // bee
+            [R_PETAL,      60, 130],   // petal_1
+            [R_FALL,       63, 130],   // petal_fall_1
+            [R_GROW,       50, 130],   // petal_grow_1
+            [R_FACE,      104, 106],   // face_12_11_1 (face block start)
+            [R_FACE + 11, 109, 107],   // face_2_1_2   (face block end)
+            [R_BEE,        50,  50],   // bee
         ];
         for (let i = 0; RES && i < chk.length; i++) {
             const d = loadDCI(RES[chk[i][0]]);
@@ -135,21 +137,22 @@ if (!RES || RES.length < 25) {
         trace("[RES] fingerprint scan\n");
         const FP = {};                        // (w<<8)|h -> table index
         for (let i = 0; i < 3; i++) FP[((60 + i) << 8) | 130] = R_PETAL + i;
-        for (let i = 0; i < 3; i++) FP[((50 + i) << 8) | 130] = R_FALL + i;
+        for (let i = 0; i < 3; i++) FP[((63 + i) << 8) | 130] = R_FALL + i;
+        for (let i = 0; i < 3; i++) FP[((50 + i) << 8) | 130] = R_GROW + i;
         for (let s = 0; s < 6; s++)
             for (let f = 0; f < 2; f++)
                 FP[((104 + s) << 8) | (106 + f)] = R_FACE + s * 2 + f;
         FP[(50 << 8) | 50] = R_BEE;
-        FP[(24 << 8) | 18] = R_WX;            // cloudy
-        FP[(24 << 8) | 25] = R_WX + 1;        // pcloudy
+        FP[(40 << 8) | 30] = R_WX;            // cloudy
+        FP[(45 << 8) | 40] = R_WX + 1;        // pcloudy
         FP[(40 << 8) | 40] = R_WX + 2;        // clear
-        FP[(24 << 8) | 26] = R_WX + 3;        // rain
+        FP[(40 << 8) | 41] = R_WX + 3;        // rain
         FP[(41 << 8) | 40] = R_WX + 4;        // snow
         FP[(42 << 8) | 40] = R_WX + 5;        // storm
-        RES = new Array(25).fill(1);
-        for (let id = 1; id <= 26; id++) {    // 26 = icon.png, fails; never
-            const dci = loadDCI(id);          // scan past the table (faults)
-            if (!dci) continue;
+        RES = new Array(R_LEN).fill(1);
+        for (let id = 1; id <= R_LEN + 1; id++) {  // last id = icon.png,
+            const dci = loadDCI(id);               // fails; never scan past
+            if (!dci) continue;                    // the table (hard-faults)
             const idx = FP[(dci.width << 8) | dci.height];
             if (idx !== undefined) RES[idx] = id;
         }
@@ -164,9 +167,10 @@ if (!RES || RES.length < 25) {
 }
 
 // Resident images: the 3 petal idle frames, the bee, and the current face
-// set (2 frames, reloaded every two hours). Fall frames are loaded one at a
-// time only while the top-of-hour drop plays — keeping all three alongside
-// a repaint's clones has blown the heap before.
+// set (2 frames, reloaded as the petal count crosses sets). Fall/grow
+// frames are loaded one at a time only while a transition plays — keeping
+// a whole sequence resident alongside a repaint's clones has blown the
+// heap before.
 const petalFrames = [];
 for (let i = 0; i < 3; i++) {
     const f = loadDCI(RES[R_PETAL + i]);
@@ -215,7 +219,9 @@ const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV
 // ── State ─────────────────────────────────────────────────────
 let weather      = null;
 let lastDate     = new Date();
-let currentH24   = lastDate.getHours();   // 0..23 — drives the bloom cycle
+let currentH24   = lastDate.getHours();   // 0..23 — the real bloom-cycle hour
+let shownH24     = currentH24;            // the hour the FLOWER displays —
+                                          // catches up when the user checks
 let useFahrenheit = true;
 try {
     const s = localStorage.getItem("settings");
@@ -265,30 +271,66 @@ function animTick() {
 function startAnim() {
     animLeft = ANIM_TICKS;
     if (!animTimer) animTimer = Timer.repeat(animTick, TICK_MS);
+    catchUp();    // the user is looking — play any missed petal transitions
 }
 
-// ── Petal fall (top of PM hours) ──────────────────────────────
-// The petal that just vanished plays the 3 fall frames at its position,
-// one frame resident at a time. Petals fall only through the PM half of the
-// bloom cycle (1PM .. midnight); AM petals bloom in with no fall.
-const FALL_MS = 400;
-let fallDCI = null, fallPos = 0, fallStep = 0, fallTimer = null;
+// ── Petal transitions — played when the user CHECKS the watch ──
+// Petals no longer change at the top of the hour. The flower keeps showing
+// the state from the user's last check (shownH24); when they next look
+// (flick / focus / launch — or mid-animation when the hour flips), the
+// missed transitions play one hour-step at a time: PM steps shed a petal
+// with the fall frames, AM steps bloom one with the grow frames. So the
+// flower itself tells you how long it's been. One overlay frame is
+// resident at a time, and steps older than CATCHUP_MAX apply instantly
+// (nobody wants to watch 23 of these after a day away).
+const FRAME_MS    = 400;   // per overlay frame (3 frames per step)
+const CATCHUP_MAX = 6;     // animate at most this many hour-steps
+let ovlDCI = null, ovlPos = 0, ovlStep = 0, ovlTimer = null;
+let hidePos = 0;           // suppress this petal's static draw while its
+                           // grow overlay plays (it's already "visible")
 
-function startFall(pos) {
-    fallPos  = pos;
-    fallStep = 0;
-    fallDCI  = loadDCI(RES[R_FALL]);
-    if (fallTimer) Timer.clear(fallTimer);
-    fallTimer = Timer.repeat(() => {
-        fallStep++;
-        if (fallStep >= 3) {
-            Timer.clear(fallTimer);
-            fallTimer = null;
-            fallDCI   = null;            // petal has fallen
+function playStep(base, pos, hide, done) {
+    ovlPos  = pos;
+    ovlStep = 0;
+    hidePos = hide ? pos : 0;
+    ovlDCI  = loadDCI(RES[base]);
+    ovlTimer = Timer.repeat(() => {
+        ovlStep++;
+        if (ovlStep >= 3) {
+            Timer.clear(ovlTimer);
+            ovlTimer = null;
+            ovlDCI   = null;
+            hidePos  = 0;
+            drawScreen();
+            done();
+            return;
         }
-        else fallDCI = loadDCI(RES[R_FALL + fallStep]);
+        ovlDCI = loadDCI(RES[base + ovlStep]);
         drawScreen();
-    }, FALL_MS);
+    }, FRAME_MS);
+}
+
+function stepCatchUp() {
+    if (shownH24 === currentH24) return;       // caught up
+    shownH24 = (shownH24 + 1) % 24;
+    loadFaceSet(petalCount());                 // face follows the flower
+    const h = shownH24;
+    if (h === 0)       playStep(R_FALL, 12,     false, stepCatchUp); // midnight: last petal
+    else if (h > 12)   playStep(R_FALL, h - 12, false, stepCatchUp); // PM shed
+    else if (h === 12) playStep(R_GROW, 1,      true,  stepCatchUp); // noon: top petal
+    else               playStep(R_GROW, h + 1,  true,  stepCatchUp); // AM bloom
+    drawScreen();
+}
+
+function catchUp() {
+    if (ovlTimer) return;                      // a sequence is already playing
+    let gap = (currentH24 - shownH24 + 24) % 24;
+    if (!gap) return;
+    if (gap > CATCHUP_MAX) {                   // too old to narrate — skip ahead
+        shownH24 = (currentH24 - CATCHUP_MAX + 24) % 24;
+        loadFaceSet(petalCount());
+    }
+    stepCatchUp();
 }
 
 // ── app_message channel ───────────────────────────────────────
@@ -305,7 +347,8 @@ function openMessageChannel() {
 }
 
 // ── Petal visibility ──────────────────────────────────────────
-// A 24-hour bloom cycle keyed off the hour (currentH24, 0..23). pos 1 is the
+// A 24-hour bloom cycle keyed off the hour the flower DISPLAYS (shownH24,
+// 0..23 — lags currentH24 until the user checks the watch). pos 1 is the
 // top (12 o'clock) petal; pos k (k=2..12) is the (k-1) o'clock petal.
 //   Midnight:  bare — no petals.
 //   AM (gain): one petal blooms each hour — the 1 o'clock petal at 1:00, the
@@ -314,15 +357,15 @@ function openMessageChannel() {
 //   PM (shed): one petal falls each hour — the 12 o'clock petal at 1:00, the
 //              1 o'clock at 2:00 … the 11 o'clock at midnight, looping to bare.
 function petalVisible(pos) {
-    const h = currentH24;                          // 0..23
+    const h = shownH24;                            // 0..23
     if (h === 12) return true;                     // noon — full bloom
     if (h < 12)   return pos >= 2 && pos <= h + 1; // AM: o'clock petals 1..h have bloomed
     return pos >= h - 11;                          // PM: o'clock petals (h-12)..11 remain
 }
 
-// Petals on screen this hour — drives which face set shows.
+// Petals on screen — drives which face set shows.
 function petalCount() {
-    const h = currentH24;
+    const h = shownH24;
     return h === 12 ? 12 : (h < 12 ? h : 24 - h);
 }
 
@@ -467,7 +510,7 @@ function drawScreen(event) {
         const fi   = petalFrameIdx();
         let pd = null, pdAngle = 0;
         for (let pos = 12; pos >= 1; pos--) {
-            if (!petalVisible(pos)) continue;
+            if (!petalVisible(pos) || pos === hidePos) continue;
             const ar = -(pos - 1) * STEP;
             if (!pd) pd = petalFrames[fi].clone().rotate(ar, P_PX[fi], P_PY[fi]);
             else     pd.rotate(ar - pdAngle, P_PX[fi], P_PY[fi]);
@@ -476,12 +519,12 @@ function drawScreen(event) {
             render.drawDCI(pd, CX - P_PX[fi], CY - P_PY[fi]);
             render.end();
         }
-        // The petal that dropped at the top of this hour, mid-fall. Frames
-        // may be a different size than the petals (~50x130), so center on
-        // their own bottom-center anchor.
-        if (fallDCI) {
-            const px = fallDCI.width >> 1, py = fallDCI.height;
-            const fd = fallDCI.clone().rotate(-(fallPos - 1) * STEP, px, py);
+        // The petal mid-transition (falling or growing). Frames may be a
+        // different size than the petals, so center on their own
+        // bottom-center anchor.
+        if (ovlDCI) {
+            const px = ovlDCI.width >> 1, py = ovlDCI.height;
+            const fd = ovlDCI.clone().rotate(-(ovlPos - 1) * STEP, px, py);
             render.begin();
             render.drawDCI(fd, CX - px, CY - py);
             render.end();
@@ -577,13 +620,10 @@ class AppBehavior extends Behavior {
             const h = clock.date.getHours();
             if (h !== currentH24) {
                 currentH24 = h;
-                loadFaceSet(petalCount());       // face tracks how many petals remain
-                // A petal falls only on PM transitions: the 12 o'clock petal
-                // (pos 1) at 1PM … the 10 o'clock (pos 11) at 11PM, and the
-                // 11 o'clock (pos 12) at midnight. AM transitions bloom a
-                // petal in — nothing falls.
-                if (h === 0)     startFall(12);
-                else if (h > 12) startFall(h - 12);
+                // The flower doesn't change yet — transitions play at the
+                // next check. But if the user is looking RIGHT NOW (the
+                // animation window is open), narrate immediately.
+                if (animLeft) catchUp();
             }
             drawScreen(clock);
         });

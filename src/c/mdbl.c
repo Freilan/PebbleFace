@@ -26,12 +26,14 @@ typedef struct {
 // it to JS, where `new FFI().ids` yields it as an ArrayBuffer.
 // LAYOUT MUST MATCH the R_* offsets in src/embeddedjs/main.js:
 //   [0..2]   petal_1..3          [3..5]   petal_fall_1..3
-//   [6..17]  face frames, set-major: 12_11, 10_9, 8_7, 6_5, 4_3, 2_1 (x2)
-//   [18]     bee
-//   [19..24] weather icons: cloudy, pcloudy, clear, rain, snow, storm
+//   [6..8]   petal_grow_1..3
+//   [9..20]  face frames, set-major: 12_11, 10_9, 8_7, 6_5, 4_3, 2_1 (x2)
+//   [21]     bee
+//   [22..27] weather icons: cloudy, pcloudy, clear, rain, snow, storm
 static const uint8_t s_resource_ids[] = {
   RESOURCE_ID_PETAL_1, RESOURCE_ID_PETAL_2, RESOURCE_ID_PETAL_3,
   RESOURCE_ID_FALL_1, RESOURCE_ID_FALL_2, RESOURCE_ID_FALL_3,
+  RESOURCE_ID_GROW_1, RESOURCE_ID_GROW_2, RESOURCE_ID_GROW_3,
   RESOURCE_ID_FACE_12_11_1, RESOURCE_ID_FACE_12_11_2,
   RESOURCE_ID_FACE_10_9_1, RESOURCE_ID_FACE_10_9_2,
   RESOURCE_ID_FACE_8_7_1, RESOURCE_ID_FACE_8_7_2,
