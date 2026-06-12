@@ -268,9 +268,18 @@ function animTick() {
     if (!(tickCount & 3)) memLine(tickCount);
 }
 
+// TEMPORARY demo hook — the cloud emulator disconnects after ~5-10 idle
+// minutes, so hour boundaries can't be reached naturally. With this on,
+// every check (flick / menu-and-back / launch) pretends one hour passed:
+// each didFocus plays the next petal transition (grow through the AM,
+// fall through the PM). Real-time hour sync is paused meanwhile.
+// SET TO false BEFORE RELEASE.
+const DEMO_HOUR_PER_CHECK = true;
+
 function startAnim() {
     animLeft = ANIM_TICKS;
     if (!animTimer) animTimer = Timer.repeat(animTick, TICK_MS);
+    if (DEMO_HOUR_PER_CHECK) currentH24 = (currentH24 + 1) % 24;
     catchUp();    // the user is looking — play any missed petal transitions
 }
 
@@ -618,7 +627,7 @@ class AppBehavior extends Behavior {
 
         watch.addEventListener("minutechange", clock => {
             const h = clock.date.getHours();
-            if (h !== currentH24) {
+            if (!DEMO_HOUR_PER_CHECK && h !== currentH24) {
                 currentH24 = h;
                 // The flower doesn't change yet — transitions play at the
                 // next check. But if the user is looking RIGHT NOW (the
