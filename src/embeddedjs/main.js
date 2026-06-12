@@ -228,6 +228,34 @@ try {
     if (s) useFahrenheit = JSON.parse(s).useFahrenheit !== false;
 } catch(e) {}
 
+// TEMPORARY demo hook — the cloud emulator disconnects after ~5-10 idle
+// minutes, so hour boundaries can't be reached naturally. With this on,
+// every check (flick / menu-and-back / launch) pretends one hour passed.
+// Real-time hour sync is paused meanwhile. SET TO false BEFORE RELEASE.
+const DEMO_HOUR_PER_CHECK = true;
+
+// The watchface is killed and relaunched whenever the user visits another
+// app, so the flower's state must survive restarts: without this every
+// launch resets shownH24 to "now" and the same single transition replays
+// (and in production a reboot would swallow missed transitions). In demo
+// mode the simulated hour persists too, so each menu round-trip continues
+// the cycle one hour further instead of repeating itself.
+try {
+    const s = JSON.parse(localStorage.getItem("flowerState"));
+    if (s) {
+        if (typeof s.shown === "number") shownH24 = s.shown % 24;
+        if (DEMO_HOUR_PER_CHECK && typeof s.demoH === "number")
+            currentH24 = s.demoH % 24;
+    }
+} catch(e) {}
+
+function saveFlowerState() {
+    try {
+        localStorage.setItem("flowerState",
+            JSON.stringify({ shown: shownH24, demoH: currentH24 }));
+    } catch(e) {}
+}
+
 // ── Animation ─────────────────────────────────────────────────
 // To save battery, the face only animates for a short window after a wrist
 // flick / tap (accelerometer tap event — the Pebble battery-conservation
@@ -272,18 +300,13 @@ function animTick() {
     if (!(tickCount & 3)) memLine(tickCount);
 }
 
-// TEMPORARY demo hook — the cloud emulator disconnects after ~5-10 idle
-// minutes, so hour boundaries can't be reached naturally. With this on,
-// every check (flick / menu-and-back / launch) pretends one hour passed:
-// each didFocus plays the next petal transition (grow through the AM,
-// fall through the PM). Real-time hour sync is paused meanwhile.
-// SET TO false BEFORE RELEASE.
-const DEMO_HOUR_PER_CHECK = true;
-
 function startAnim() {
     animLeft = ANIM_TICKS;
     if (!animTimer) animTimer = Timer.repeat(animTick, TICK_MS);
-    if (DEMO_HOUR_PER_CHECK) currentH24 = (currentH24 + 1) % 24;
+    if (DEMO_HOUR_PER_CHECK) {
+        currentH24 = (currentH24 + 1) % 24;
+        saveFlowerState();
+    }
     trace("[CHK] check: now=", currentH24, " shown=", shownH24, "\n");
     catchUp();    // the user is looking — play any missed petal transitions
 }
@@ -327,6 +350,7 @@ function playStep(base, pos, hide, done) {
 function stepCatchUp() {
     if (shownH24 === currentH24) return;       // caught up
     shownH24 = (shownH24 + 1) % 24;
+    saveFlowerState();
     loadFaceSet(petalCount());                 // face follows the flower
     const h = shownH24;
     let base = R_GROW, pos = h + 1, hide = true;                  // AM bloom
