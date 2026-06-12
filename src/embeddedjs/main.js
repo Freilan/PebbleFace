@@ -280,6 +280,7 @@ function startAnim() {
     animLeft = ANIM_TICKS;
     if (!animTimer) animTimer = Timer.repeat(animTick, TICK_MS);
     if (DEMO_HOUR_PER_CHECK) currentH24 = (currentH24 + 1) % 24;
+    trace("[CHK] check: now=", currentH24, " shown=", shownH24, "\n");
     catchUp();    // the user is looking — play any missed petal transitions
 }
 
@@ -324,10 +325,12 @@ function stepCatchUp() {
     shownH24 = (shownH24 + 1) % 24;
     loadFaceSet(petalCount());                 // face follows the flower
     const h = shownH24;
-    if (h === 0)       playStep(R_FALL, 12,     false, stepCatchUp); // midnight: last petal
-    else if (h > 12)   playStep(R_FALL, h - 12, false, stepCatchUp); // PM shed
-    else if (h === 12) playStep(R_GROW, 1,      true,  stepCatchUp); // noon: top petal
-    else               playStep(R_GROW, h + 1,  true,  stepCatchUp); // AM bloom
+    let base = R_GROW, pos = h + 1, hide = true;                  // AM bloom
+    if (h === 0)       { base = R_FALL; pos = 12; hide = false; } // midnight: last petal
+    else if (h > 12)   { base = R_FALL; pos = h - 12; hide = false; } // PM shed
+    else if (h === 12) { pos = 1; }                               // noon: top petal
+    trace("[CHK] ", base === R_FALL ? "fall" : "grow", " pos=", pos, " shown=", h, "\n");
+    playStep(base, pos, hide, stepCatchUp);
     drawScreen();
 }
 
