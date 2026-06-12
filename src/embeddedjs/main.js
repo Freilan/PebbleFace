@@ -239,14 +239,18 @@ let tickCount = 0, animLeft = 0, animTimer = null;
 let accel = null;          // keep the instance alive — GC would unsubscribe tap
 let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
 
-// All petals advance together (~1x/sec, offset 2 ticks from the face flip
-// so the whole flower doesn't change at once). Per-petal staggered rates
-// were dropped: each distinct frame on screen costs one clone PER TICK
-// (~1.7KB of app heap each), and three chains churned ~5.4KB/tick — more
-// than the GC reclaimed in time.
-function petalFrameIdx() {
-    if (!animLeft || petalFrames.length < 2) return 0;
-    return ((tickCount + 2) >> 2) % petalFrames.length;
+// Each petal is offset by its position, so the resting flower is already
+// varied (frames 0,1,2,0,… around the wheel) and during the animation
+// window the frame advance (~1x/sec, offset 2 ticks from the face flip)
+// travels around the flower as a wave instead of a synchronized blink.
+// Three distinct frames on screen = three clone chains per repaint
+// (~5KB/tick of app heap the GC can't see) — affordable only because
+// animTick presses the GC hard enough to collect every ~3 ticks.
+function petalFrameIdx(pos) {
+    const n = petalFrames.length;
+    if (n < 2) return 0;
+    const base = animLeft ? ((tickCount + 2) >> 2) : 0;
+    return (base + pos) % n;
 }
 
 function animTick() {
@@ -258,13 +262,13 @@ function animTick() {
     }
     drawScreen();
     // XS garbage-collects on CHUNK pressure only and cannot see the app
-    // heap behind each clone — and chunk garbage is just ~300B/tick, so
-    // the pool alone would let native garbage pile up for many ticks.
-    // Nudge the GC every other tick (small ask: an over-pool chunk
-    // allocation aborts rather than throws).
-    if (!(tickCount & 1)) {
-        try { new ArrayBuffer(1024); } catch(e) {}
-    }
+    // heap behind each clone — and organic chunk garbage is just
+    // ~300B/tick, so the pool alone would let native garbage pile up for
+    // many ticks. With three petal chains (~5KB/tick) the GC must run
+    // every ~3 ticks: press it with 2KB per tick. Sized so a single ask
+    // always fits the 14KB pool even at the fetch's ~11KB live peak —
+    // an over-pool chunk allocation aborts rather than throws.
+    try { new ArrayBuffer(2048); } catch(e) {}
     if (!(tickCount & 3)) memLine(tickCount);
 }
 
@@ -514,19 +518,21 @@ function drawScreen(event) {
         render.end();
     }
 
-    // Layer 2: petals. All petals show the same idle frame (frame 0
-    // outside the animation window): ONE clone per repaint, rotated
-    // incrementally to each position.
+    // Layer 2: petals. Each petal's frame is offset by its position, so
+    // up to three distinct frames are on screen at once. One clone per
+    // frame IMAGE in use — petals sharing a frame reuse its chain,
+    // rotated incrementally to each position.
     if (petalFrames.length) {
-        const STEP = 30 * Math.PI / 180;
-        const fi   = petalFrameIdx();
-        let pd = null, pdAngle = 0;
+        const STEP   = 30 * Math.PI / 180;
+        const clones = [null, null, null], angles = [0, 0, 0];
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos) || pos === hidePos) continue;
+            const fi = petalFrameIdx(pos);
             const ar = -(pos - 1) * STEP;
-            if (!pd) pd = petalFrames[fi].clone().rotate(ar, P_PX[fi], P_PY[fi]);
-            else     pd.rotate(ar - pdAngle, P_PX[fi], P_PY[fi]);
-            pdAngle = ar;
+            let pd = clones[fi];
+            if (!pd) pd = clones[fi] = petalFrames[fi].clone().rotate(ar, P_PX[fi], P_PY[fi]);
+            else     pd.rotate(ar - angles[fi], P_PX[fi], P_PY[fi]);
+            angles[fi] = ar;
             render.begin();
             render.drawDCI(pd, CX - P_PX[fi], CY - P_PY[fi]);
             render.end();
