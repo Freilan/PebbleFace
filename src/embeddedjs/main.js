@@ -40,11 +40,36 @@ function getFont(name, size) {
 }
 const font = getFont("MarkerFelt10", 20);
 
-// ── Colors ────────────────────────────────────────────────────
-const C_BG    = render.makeColor( 85, 255, 170);
+// ── Colors & appearance settings ──────────────────────────────
 const C_BLACK = render.makeColor(  0,   0,   0);
 const C_WHITE = render.makeColor(255, 255, 255);
-const C_DOT   = render.makeColor(  0, 170,  85);
+
+// Clay sends colors as a 24-bit RGB integer (the GColorFromHEX form).
+function colorFromInt(v) {
+    v = Number(v) & 0xFFFFFF;
+    return render.makeColor((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+}
+
+// User-configurable appearance, set from the phone config page (Clay) and
+// persisted in localStorage "settings" so it survives the relaunch that
+// happens every time the user leaves the face. Defaults match the original
+// look: mint background, darker-green dots, everything shown, °F.
+let bgInt = 0x55FFAA, dotInt = 0x00AA55;
+let showDots = true, showDate = true, showWeather = true;
+let useFahrenheit = true;
+try {
+    const s = JSON.parse(localStorage.getItem("settings"));
+    if (s) {
+        if (typeof s.bg  === "number") bgInt  = s.bg;
+        if (typeof s.dot === "number") dotInt = s.dot;
+        if (typeof s.showDots      === "boolean") showDots      = s.showDots;
+        if (typeof s.showDate      === "boolean") showDate      = s.showDate;
+        if (typeof s.showWeather   === "boolean") showWeather   = s.showWeather;
+        if (typeof s.useFahrenheit === "boolean") useFahrenheit = s.useFahrenheit;
+    }
+} catch(e) {}
+let C_BG  = colorFromInt(bgInt);
+let C_DOT = colorFromInt(dotInt);
 
 // ── Geometry ──────────────────────────────────────────────────
 const W  = render.width;
@@ -222,17 +247,13 @@ let lastDate     = new Date();
 let currentH24   = lastDate.getHours();   // 0..23 — the real bloom-cycle hour
 let shownH24     = currentH24;            // the hour the FLOWER displays —
                                           // catches up when the user checks
-let useFahrenheit = true;
-try {
-    const s = localStorage.getItem("settings");
-    if (s) useFahrenheit = JSON.parse(s).useFahrenheit !== false;
-} catch(e) {}
 
-// TEMPORARY demo hook — the cloud emulator disconnects after ~5-10 idle
-// minutes, so hour boundaries can't be reached naturally. With this on,
-// every check (flick / menu-and-back / launch) pretends one hour passed.
-// Real-time hour sync is paused meanwhile. SET TO false BEFORE RELEASE.
-const DEMO_HOUR_PER_CHECK = true;
+// Demo / test hook. 0 = OFF (real-time hour sync — the shipping behavior).
+// When > 0, every check (flick / menu-and-back / launch) pretends this many
+// hours passed, so you can watch the catch-up cascade without waiting real
+// hours: e.g. set to 4 to fire a 4-petal staggered fall/grow on each check.
+// Real-time sync is paused while it's non-zero. KEEP AT 0 FOR RELEASE.
+const DEMO_HOURS_PER_CHECK = 0;
 
 // The watchface is killed and relaunched whenever the user visits another
 // app, so the flower's state must survive restarts: without this every
@@ -244,7 +265,7 @@ try {
     const s = JSON.parse(localStorage.getItem("flowerState"));
     if (s) {
         if (typeof s.shown === "number") shownH24 = s.shown % 24;
-        if (DEMO_HOUR_PER_CHECK && typeof s.demoH === "number")
+        if (DEMO_HOURS_PER_CHECK && typeof s.demoH === "number")
             currentH24 = s.demoH % 24;
     }
 } catch(e) {}
@@ -288,7 +309,10 @@ function animTick() {
         animTimer = null;
         animLeft = 0;
     }
-    drawScreen();
+    // A running cascade repaints faster (and owns the overlay state), so let
+    // it do the drawing while it plays — this just keeps tickCount advancing
+    // so the face/petal frames it paints stay animated.
+    if (!casTimer) drawScreen();
     // XS garbage-collects on CHUNK pressure only and cannot see the app
     // heap behind each clone — and organic chunk garbage is just
     // ~300B/tick, so the pool alone would let native garbage pile up for
@@ -303,87 +327,173 @@ function animTick() {
 function startAnim() {
     animLeft = ANIM_TICKS;
     if (!animTimer) animTimer = Timer.repeat(animTick, TICK_MS);
-    if (DEMO_HOUR_PER_CHECK) {
-        currentH24 = (currentH24 + 1) % 24;
+    if (DEMO_HOURS_PER_CHECK) {
+        currentH24 = (currentH24 + DEMO_HOURS_PER_CHECK) % 24;
         saveFlowerState();
     }
     trace("[CHK] check: now=", currentH24, " shown=", shownH24, "\n");
     catchUp();    // the user is looking — play any missed petal transitions
 }
 
-// ── Petal transitions — played when the user CHECKS the watch ──
-// Petals no longer change at the top of the hour. The flower keeps showing
-// the state from the user's last check (shownH24); when they next look
-// (flick / focus / launch — or mid-animation when the hour flips), the
-// missed transitions play one hour-step at a time: PM steps shed a petal
-// with the fall frames, AM steps bloom one with the grow frames. So the
-// flower itself tells you how long it's been. One overlay frame is
-// resident at a time, and steps older than CATCHUP_MAX apply instantly
-// (nobody wants to watch 23 of these after a day away).
-const FRAME_MS    = 400;   // per overlay frame (3 frames per step)
-const CATCHUP_MAX = 6;     // animate at most this many hour-steps
-let ovlDCI = null, ovlPos = 0, ovlStep = 0, ovlTimer = null;
-let hidePos = 0;           // suppress this petal's static draw while its
-                           // grow overlay plays (it's already "visible")
+// ── Petal transitions — a staggered cascade played on CHECK ────
+// Petals don't change at the top of the hour. The flower holds the state
+// from the user's last check (shownH24); when they next look (flick / focus
+// / launch — or mid-animation when the hour flips), every petal missed since
+// then animates. PM/midnight hours shed a petal with the fall frames, AM/noon
+// hours bloom one with the grow frames.
+//
+// The petals are STAGGERED: the one furthest from now (the oldest missed
+// hour) starts first, and each later one begins STAGGER_MS after it — so with
+// several to play, the first goes immediately and they cascade rather than
+// waiting in line. Each step commits its petal to the static flower the
+// instant it starts (a fall's petal vanishes / a grow's appears on cue) and
+// owns one resident overlay frame while it plays. Steps older than CATCHUP_MAX
+// snap instantly (nobody wants to watch 23 of these after a day away).
+const STAGGER_MS  = 500;   // delay between consecutive petals starting
+const FRAME_MS    = 400;   // per overlay frame; 3 frames => 1200ms per petal
+const STEP_FRAMES = 3;
+const CAS_TICK    = 200;   // cascade driver cadence
+const CATCHUP_MAX = 6;     // animate at most this many missed hours
 
-function playStep(base, pos, hide, done) {
-    ovlPos  = pos;
-    ovlStep = 0;
-    hidePos = hide ? pos : 0;
-    ovlDCI  = loadDCI(RES[base]);
-    ovlTimer = Timer.repeat(() => {
-        ovlStep++;
-        if (ovlStep >= 3) {
-            Timer.clear(ovlTimer);
-            ovlTimer = null;
-            ovlDCI   = null;
-            hidePos  = 0;
-            drawScreen();
-            done();
-            return;
-        }
-        ovlDCI = loadDCI(RES[base + ovlStep]);
-        drawScreen();
-    }, FRAME_MS);
+let plan = [];             // ordered steps, oldest/furthest-from-now first
+let casT0 = 0, casTimer = null;
+const hideSet = [];        // positions whose static petal is suppressed while
+                           // their grow overlay is drawing them in
+
+function makeStep(h) {
+    let base = R_GROW, pos = h + 1, grow = true;                  // AM bloom
+    if (h === 0)       { base = R_FALL; pos = 12; grow = false; } // midnight: last petal
+    else if (h > 12)   { base = R_FALL; pos = h - 12; grow = false; } // PM shed
+    else if (h === 12) { pos = 1; }                               // noon: top petal
+    return { base, pos, grow, target: h, started: false, frame: -1, dci: null, done: false };
 }
 
-function stepCatchUp() {
-    if (shownH24 === currentH24) return;       // caught up
-    shownH24 = (shownH24 + 1) % 24;
-    saveFlowerState();
-    loadFaceSet(petalCount());                 // face follows the flower
-    const h = shownH24;
-    let base = R_GROW, pos = h + 1, hide = true;                  // AM bloom
-    if (h === 0)       { base = R_FALL; pos = 12; hide = false; } // midnight: last petal
-    else if (h > 12)   { base = R_FALL; pos = h - 12; hide = false; } // PM shed
-    else if (h === 12) { pos = 1; }                               // noon: top petal
-    trace("[CHK] ", base === R_FALL ? "fall" : "grow", " pos=", pos, " shown=", h, "\n");
-    playStep(base, pos, hide, stepCatchUp);
+function endCascade() {
+    Timer.clear(casTimer);
+    casTimer = null;
+    plan = [];
+    hideSet.length = 0;
     drawScreen();
 }
 
+function casTick() {
+    const elapsed = Date.now() - casT0;
+    for (let i = 0; i < plan.length; i++) {
+        const s = plan[i];
+        if (s.done) continue;
+        const local = elapsed - i * STAGGER_MS;   // this petal's own clock
+        if (local < 0) continue;                  // its turn hasn't come yet
+        if (!s.started) {                         // commit it to the flower
+            s.started = true;
+            shownH24 = s.target;
+            saveFlowerState();
+            loadFaceSet(petalCount());            // face follows the flower
+            if (s.grow) hideSet.push(s.pos);      // the overlay draws it now
+            trace("[CHK] ", s.grow ? "grow" : "fall", " pos=", s.pos, " shown=", s.target, "\n");
+        }
+        const fr = (local / FRAME_MS) | 0;
+        if (fr >= STEP_FRAMES) {                  // this petal finished
+            s.done = true;
+            s.dci  = null;
+            if (s.grow) {
+                const k = hideSet.indexOf(s.pos);
+                if (k >= 0) hideSet.splice(k, 1);
+            }
+            continue;
+        }
+        if (s.frame !== fr) {                     // advance its overlay frame
+            s.frame = fr;
+            s.dci   = loadDCI(RES[s.base + fr]);
+        }
+    }
+    drawScreen();
+    // The overlay clones are app-heap garbage the GC can't see; nudge it
+    // (small ask — an over-pool chunk allocation aborts uncatchably).
+    try { new ArrayBuffer(2048); } catch(e) {}
+    let allDone = true;
+    for (let i = 0; i < plan.length; i++) if (!plan[i].done) { allDone = false; break; }
+    if (allDone) endCascade();
+}
+
 function catchUp() {
-    if (ovlTimer) return;                      // a sequence is already playing
+    if (casTimer) return;                         // a cascade is already playing
     let gap = (currentH24 - shownH24 + 24) % 24;
     if (!gap) return;
-    if (gap > CATCHUP_MAX) {                   // too old to narrate — skip ahead
+    if (gap > CATCHUP_MAX) {                       // too old to narrate — snap
         shownH24 = (currentH24 - CATCHUP_MAX + 24) % 24;
         loadFaceSet(petalCount());
+        gap = CATCHUP_MAX;
     }
-    stepCatchUp();
+    plan = [];
+    let h = shownH24;
+    for (let k = 0; k < gap; k++) { h = (h + 1) % 24; plan.push(makeStep(h)); }
+    casT0 = Date.now();
+    casTimer = Timer.repeat(casTick, CAS_TICK);
+    casTick();                                    // start step 0 immediately
+}
+
+// ── Settings from the phone (Clay config page) ────────────────
+// The config page (src/pkjs/config.js) sends these on save. The key ORDER
+// must match package.json "messageKeys": the Message class maps keys[i] to
+// app-message code 10000+i, which is exactly how Pebble numbers messageKeys.
+// (The pebbleproxy uses codes 15000+, so the two channels never collide —
+// incoming messages are routed to the matching Message instance by key.)
+const SETTINGS_KEYS = [
+    "BackgroundColor",   // 10000  color
+    "ShowDots",          // 10001  toggle
+    "DotColor",          // 10002  color
+    "ShowDate",          // 10003  toggle
+    "ShowWeather",       // 10004  toggle
+    "TemperatureUnit",   // 10005  toggle (on = Fahrenheit)
+];
+
+function persistSettings() {
+    try {
+        localStorage.setItem("settings", JSON.stringify({
+            bg: bgInt, dot: dotInt,
+            showDots, showDate, showWeather, useFahrenheit
+        }));
+    } catch(e) {}
+}
+
+// Apply a received settings map. Colors arrive as 24-bit RGB ints; toggles as
+// 0/1 (Clay converts booleans). Only fields present in the map are touched.
+function applySettings(map) {
+    if (map.has("BackgroundColor")) { bgInt  = Number(map.get("BackgroundColor")) & 0xFFFFFF; C_BG  = colorFromInt(bgInt); }
+    if (map.has("DotColor"))        { dotInt = Number(map.get("DotColor"))        & 0xFFFFFF; C_DOT = colorFromInt(dotInt); }
+    if (map.has("ShowDots"))        showDots    = !!map.get("ShowDots");
+    if (map.has("ShowDate"))        showDate    = !!map.get("ShowDate");
+    if (map.has("ShowWeather"))     showWeather = !!map.get("ShowWeather");
+    if (map.has("TemperatureUnit")) {
+        const next = !!map.get("TemperatureUnit");
+        if (next !== useFahrenheit) {            // unit changed — refetch so the
+            useFahrenheit = next;                // displayed temp updates now,
+            requestLocation();                   // not at the next hourly fetch
+        }
+    }
+    persistSettings();
+    drawScreen();
 }
 
 // ── app_message channel ───────────────────────────────────────
-// The FIRST Message created fixes the app_message buffer sizes for the
-// app's life; the default is maximum (8200 in + 8200 out = 16.4KB of heap).
-// Location passes no sizes, so open the channel small BEFORE anything else
-// does. Safe: the phone proxy fragments HTTP responses to fit the inbox,
-// and our weather JSON / Clay settings are a few hundred bytes. Kept alive
-// for the app's life (module-level ref).
+// The FIRST Message created fixes the app_message buffer sizes for the app's
+// life; the default is maximum (8200 in + 8200 out = 16.4KB of heap). Location
+// passes no sizes, so open the channel small BEFORE anything else does. Safe:
+// the phone proxy fragments HTTP responses to fit the inbox, and our weather
+// JSON / Clay settings are a few hundred bytes. This same channel carries the
+// settings (its keys route Clay's message here); kept alive for the app's life.
 let msgChannel = null;
 function openMessageChannel() {
-    try { msgChannel = new Message({ input: 2048, output: 1024 }); }
-    catch(e) {}
+    try {
+        msgChannel = new Message({
+            input: 2048, output: 1024,
+            keys: SETTINGS_KEYS,
+            onReadable() {
+                try { applySettings(this.read()); trace("[CFG] settings applied\n"); }
+                catch(e) { trace("[CFG] apply failed ", String(e), "\n"); }
+            }
+        });
+    } catch(e) {}
 }
 
 // ── Petal visibility ──────────────────────────────────────────
@@ -474,9 +584,9 @@ async function fetchWeather(lat, lon) {
         } catch(e) {}
         trace("[WX] applied\n");
         memLine("applied");
-        // While the animation runs, the next tick repaints within 250ms —
+        // While an animation/cascade runs, the next tick repaints shortly —
         // skip the extra draw at this (heaviest) moment.
-        if (!animTimer) drawScreen();
+        if (!animTimer && !casTimer) drawScreen();
     } catch(e) { trace("[WX] failed ", String(e), "\n"); }
 }
 
@@ -522,21 +632,23 @@ function drawScreen(event) {
         const yBot = (ddy + DOT_GRID > 126) ? H : CY + ddy + DOT_GRID - (DOT_GRID >> 1);
         render.begin(0, yTop, W, yBot - yTop);
         render.fillRectangle(C_BG, 0, 0, W, H);
-        const row = Math.round((ddy + 126) / DOT_GRID);
-        const ox  = (row % 2 === 0) ? 0 : DOT_GRID >> 1;
-        for (let ddx = -126; ddx <= 126; ddx += DOT_GRID) {
-            const ax = ddx + ox;
-            if (ax * ax + ddy * ddy < DOT_R_SQ - 150) {
-                const px = CX + ax, py = CY + ddy;
-                render.fillRectangle(C_DOT, px-2, py-4, 4, 1);
-                render.fillRectangle(C_DOT, px-3, py-3, 6, 1);
-                render.fillRectangle(C_DOT, px-4, py-2, 8, 1);
-                render.fillRectangle(C_DOT, px-4, py-1, 8, 1);
-                render.fillRectangle(C_DOT, px-4, py,   8, 1);
-                render.fillRectangle(C_DOT, px-4, py+1, 8, 1);
-                render.fillRectangle(C_DOT, px-4, py+2, 8, 1);
-                render.fillRectangle(C_DOT, px-3, py+3, 6, 1);
-                render.fillRectangle(C_DOT, px-2, py+4, 4, 1);
+        if (showDots) {
+            const row = Math.round((ddy + 126) / DOT_GRID);
+            const ox  = (row % 2 === 0) ? 0 : DOT_GRID >> 1;
+            for (let ddx = -126; ddx <= 126; ddx += DOT_GRID) {
+                const ax = ddx + ox;
+                if (ax * ax + ddy * ddy < DOT_R_SQ - 150) {
+                    const px = CX + ax, py = CY + ddy;
+                    render.fillRectangle(C_DOT, px-2, py-4, 4, 1);
+                    render.fillRectangle(C_DOT, px-3, py-3, 6, 1);
+                    render.fillRectangle(C_DOT, px-4, py-2, 8, 1);
+                    render.fillRectangle(C_DOT, px-4, py-1, 8, 1);
+                    render.fillRectangle(C_DOT, px-4, py,   8, 1);
+                    render.fillRectangle(C_DOT, px-4, py+1, 8, 1);
+                    render.fillRectangle(C_DOT, px-4, py+2, 8, 1);
+                    render.fillRectangle(C_DOT, px-3, py+3, 6, 1);
+                    render.fillRectangle(C_DOT, px-2, py+4, 4, 1);
+                }
             }
         }
         render.end();
@@ -550,7 +662,7 @@ function drawScreen(event) {
         const STEP   = 30 * Math.PI / 180;
         const clones = [null, null, null], angles = [0, 0, 0];
         for (let pos = 12; pos >= 1; pos--) {
-            if (!petalVisible(pos) || pos === hidePos) continue;
+            if (!petalVisible(pos) || hideSet.indexOf(pos) >= 0) continue;
             const fi = petalFrameIdx(pos);
             const ar = -(pos - 1) * STEP;
             let pd = clones[fi];
@@ -561,12 +673,15 @@ function drawScreen(event) {
             render.drawDCI(pd, CX - P_PX[fi], CY - P_PY[fi]);
             render.end();
         }
-        // The petal mid-transition (falling or growing). Frames may be a
-        // different size than the petals, so center on their own
-        // bottom-center anchor.
-        if (ovlDCI) {
-            const px = ovlDCI.width >> 1, py = ovlDCI.height;
-            const fd = ovlDCI.clone().rotate(-(ovlPos - 1) * STEP, px, py);
+        // Petals mid-transition (falling or growing). Several cascade steps
+        // can be showing a frame at once; each draws its own overlay, rotated
+        // to its position. Frames may differ in size from the petals, so each
+        // centers on its own bottom-center anchor.
+        for (let i = 0; i < plan.length; i++) {
+            const s = plan[i];
+            if (!s.dci) continue;
+            const px = s.dci.width >> 1, py = s.dci.height;
+            const fd = s.dci.clone().rotate(-(s.pos - 1) * STEP, px, py);
             render.begin();
             render.drawDCI(fd, CX - px, CY - py);
             render.end();
@@ -598,37 +713,41 @@ function drawScreen(event) {
 
     let w, a;
 
-    a = petalAnchor(300);
-    const dayStr = DAYS[now.getDay()];
-    w = render.getTextWidth(dayStr, font);
-    strokeText(dayStr, a.x - (w >> 1), a.y - (font.height >> 1));
+    if (showDate) {
+        a = petalAnchor(300);
+        const dayStr = DAYS[now.getDay()];
+        w = render.getTextWidth(dayStr, font);
+        strokeText(dayStr, a.x - (w >> 1), a.y - (font.height >> 1));
 
-    a = petalAnchor(270);
-    const dateStr = MONTHS[now.getMonth()] + " " + String(now.getDate()).padStart(2, "0");
-    w = render.getTextWidth(dateStr, font);
-    strokeText(dateStr, a.x - (w >> 1) - 5, a.y - (font.height >> 1));
+        a = petalAnchor(270);
+        const dateStr = MONTHS[now.getMonth()] + " " + String(now.getDate()).padStart(2, "0");
+        w = render.getTextWidth(dateStr, font);
+        strokeText(dateStr, a.x - (w >> 1) - 5, a.y - (font.height >> 1));
+    }
 
-    a = petalAnchor(60);
-    // Temperature number, then a hand-drawn degree ring just after it (the font
-    // has no \u00B0 glyph). Center the number+degree together.
-    const numStr = weather ? String(weather.temp) : "--";
-    const DEG_GAP = 2, DEG_W = 9;
-    w = render.getTextWidth(numStr, font);
-    const tx = a.x - ((w + DEG_GAP + DEG_W) >> 1) + 5;
-    const ty = a.y - (font.height >> 1);
-    strokeText(numStr, tx, ty);
-    drawDegree(tx + w + DEG_GAP, ty + 1);   // ty+1 nudges it to the digits' top
+    if (showWeather) {
+        a = petalAnchor(60);
+        // Temperature number, then a hand-drawn degree ring just after it (the font
+        // has no \u00B0 glyph). Center the number+degree together.
+        const numStr = weather ? String(weather.temp) : "--";
+        const DEG_GAP = 2, DEG_W = 9;
+        w = render.getTextWidth(numStr, font);
+        const tx = a.x - ((w + DEG_GAP + DEG_W) >> 1) + 5;
+        const ty = a.y - (font.height >> 1);
+        strokeText(numStr, tx, ty);
+        drawDegree(tx + w + DEG_GAP, ty + 1);   // ty+1 nudges it to the digits' top
 
-    // Weather condition — drawn as an icon based on the weather data,
-    // replacing the old text label (e.g. "Cloudy"). Centered on the anchor.
-    a = petalAnchor(90);
-    if (weather) {
-        const wx = WX_OFFSET[weather.desc];
-        if (wx !== undefined) {
-            const icon = loadDCI(RES[R_WX + wx]);
-            if (icon) render.drawDCI(icon,
-                a.x - (icon.width  >> 1),
-                a.y - (icon.height >> 1));
+        // Weather condition — drawn as an icon based on the weather data,
+        // replacing the old text label (e.g. "Cloudy"). Centered on the anchor.
+        a = petalAnchor(90);
+        if (weather) {
+            const wx = WX_OFFSET[weather.desc];
+            if (wx !== undefined) {
+                const icon = loadDCI(RES[R_WX + wx]);
+                if (icon) render.drawDCI(icon,
+                    a.x - (icon.width  >> 1),
+                    a.y - (icon.height >> 1));
+            }
         }
     }
 
@@ -660,7 +779,7 @@ class AppBehavior extends Behavior {
 
         watch.addEventListener("minutechange", clock => {
             const h = clock.date.getHours();
-            if (!DEMO_HOUR_PER_CHECK && h !== currentH24) {
+            if (!DEMO_HOURS_PER_CHECK && h !== currentH24) {
                 currentH24 = h;
                 // The flower doesn't change yet — transitions play at the
                 // next check. But if the user is looking RIGHT NOW (the

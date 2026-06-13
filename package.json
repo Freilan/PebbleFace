@@ -17,11 +17,11 @@
         "enableMultiJS": true,
         "messageKeys": [
             "BackgroundColor",
-            "TextColor",
-            "TemperatureUnit",
+            "ShowDots",
+            "DotColor",
             "ShowDate",
-            "HourFormat",
-            "YoshiColor"
+            "ShowWeather",
+            "TemperatureUnit"
         ],
         "projectType": "moddable",
         "resources": {
