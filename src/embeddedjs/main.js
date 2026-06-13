@@ -346,8 +346,10 @@ function startAnim() {
 // nothing falls (a fill bar, not a spinner). Plugged in, so animating is free.
 const CHARGE_FRAME_MS = 167;   // ~0.5s per petal (CHARGE_SPF grow frames each)
 const CHARGE_SPF      = 3;     // animation frames per petal in the fill bar
-const SPIN_SPF        = 2;     // frames per petal during the spin-up (quicker than the bar)
-const SPIN_FRAMES     = 12 * SPIN_SPF;    // one-lap spin-up flourish (~4s)
+const SPIN_SPF        = 3;     // render ticks per petal in the spin-up — 3 so all
+                               // three grow/fall frames play (one per ~167ms tick;
+                               // fewer drops frames, the watch can't render faster)
+const SPIN_FRAMES     = 12 * SPIN_SPF;    // one-lap spin-up flourish (~6s)
 const SPIN_ARC        = 3;     // width of the spinning comet (grow + solids + fall)
 const CHARGE_FACE_SPF = 4;     // smiley flips between its two frames every ~0.67s
 let charging    = false;
@@ -723,7 +725,7 @@ function drawScreen(event) {
             // Spin-up flourish: a comet sweeps clockwise once around before the
             // bar settles. The newest petal GROWS in at the leading edge, the
             // oldest FALLS off the trailing edge, solid petals in between — the
-            // original "growing and shedding" loader, one petal per ~0.33s.
+            // original "growing and shedding" loader, one petal per ~0.5s.
             const sstep = (cf / SPIN_SPF) | 0;          // 0..11 over one lap
             const fis   = cf % SPIN_SPF;                // sub-step within this petal
             // Map the SPIN_SPF sub-steps across the full 0..2 grow/fall frames
