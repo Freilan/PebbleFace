@@ -8,6 +8,7 @@ import parseRLE from "commodetto/parseRLE";
 import Timer from "timer";
 import Location from "embedded:sensor/Location";
 import Accelerometer from "embedded:sensor/Accelerometer";
+import Battery from "embedded:sensor/Battery";
 import Message from "pebble/message";
 import Instrumentation from "instrumentation";
 
@@ -325,6 +326,7 @@ function animTick() {
 }
 
 function startAnim() {
+    if (charging) return;      // charging runs its own loop; ignore taps/focus
     animLeft = ANIM_TICKS;
     if (!animTimer) animTimer = Timer.repeat(animTick, TICK_MS);
     if (DEMO_HOURS_PER_CHECK) {
@@ -333,6 +335,59 @@ function startAnim() {
     }
     trace("[CHK] check: now=", currentH24, " shown=", shownH24, "\n");
     catchUp();    // the user is looking — play any missed petal transitions
+}
+
+// ── Charging mode ─────────────────────────────────────────────
+// On the charger the watch can't be worn, so instead of the time the face
+// becomes a charging PROGRESS BAR. Petals grow in clockwise from the top up to
+// the petal that matches the current charge: 0% is just the top petal, 50%
+// reaches the 6 o'clock petal, a full lap is 100% (whole flower). The leading
+// petal keeps pulsing through the grow frames to show it's actively charging;
+// nothing falls (a fill bar, not a spinner). Plugged in, so animating is free.
+const CHARGE_FRAME_MS = 167;   // ~0.5s per petal (CHARGE_SPF grow frames each)
+const CHARGE_SPF      = 3;     // animation frames per petal
+const SPIN_FRAMES     = 12;    // a one-lap spin-up flourish before the bar fills (~2s)
+const SPIN_ARC        = 3;     // petals in the spinning comet
+let charging    = false;
+let chargeTimer = null;
+let chargePct   = 0;           // 0..100, from the battery sensor
+let cf = 0;                    // charge frame counter
+let battery     = null;        // keep the instance alive — GC would unsubscribe
+
+// Charge % -> how many petals are filled (the last one is the leading petal,
+// still growing/pulsing). 0% = top petal only, 50% = the 6 o'clock petal,
+// 100% = all 12. Mapped over 11 steps so a full lap lands on the last petal.
+function chargeLevel(pct) {
+    const n = Math.round((pct / 100) * 11) + 1;
+    return n < 1 ? 1 : (n > 12 ? 12 : n);
+}
+
+function chargeTick() {
+    cf++;
+    drawScreen();
+    try { new ArrayBuffer(2048); } catch(e) {}    // same GC nudge as the anim loop
+    if (!(cf & 15)) memLine(cf);                   // monitor a long charge
+}
+
+function setCharging(on) {
+    on = !!on;
+    if (on === charging) return;                  // battery % ticks fire this too
+    charging = on;
+    if (on) {
+        cf = 0;
+        if (animTimer) { Timer.clear(animTimer); animTimer = null; animLeft = 0; }
+        if (casTimer) endCascade();               // abandon any catch-up cascade
+        loadFaceSet(12);                          // cheerful full-flower face
+        chargeTimer = Timer.repeat(chargeTick, CHARGE_FRAME_MS);
+        trace("[BAT] charging — loader on\n");
+        drawScreen();
+    } else {
+        if (chargeTimer) { Timer.clear(chargeTimer); chargeTimer = null; }
+        loadFaceSet(petalCount());                // back to the real face
+        trace("[BAT] unplugged — loader off\n");
+        drawScreen();
+        startAnim();                              // unplugged — user is likely looking
+    }
 }
 
 // ── Petal transitions — a staggered cascade played on CHECK ────
@@ -654,6 +709,70 @@ function drawScreen(event) {
         render.end();
     }
 
+    // Charging: a petal progress bar over the same background. Petals fill
+    // clockwise from the top up to the charge level; the leading petal pulses.
+    // Nothing falls. No time / date / weather / bee here.
+    if (charging) {
+        if (petalFrames.length) {
+            const STEP = 30 * Math.PI / 180;
+            const f0 = petalFrames[0];
+            const fpx = f0.width >> 1, fpy = f0.height;
+          if (cf < SPIN_FRAMES) {
+            // Spin-up flourish: a short comet of petals sweeps clockwise once
+            // around the whole circle before the bar settles to the charge level.
+            const head = cf % 12;                       // leading position (0-based)
+            let clone = null, ang = 0;
+            for (let d = 0; d < SPIN_ARC; d++) {
+                const pos = ((head - d) % 12 + 12) % 12 + 1;
+                const ar  = -(pos - 1) * STEP;
+                if (!clone) clone = f0.clone().rotate(ar, fpx, fpy);
+                else        clone.rotate(ar - ang, fpx, fpy);
+                ang = ar;
+                render.begin(); render.drawDCI(clone, CX - fpx, CY - fpy); render.end();
+            }
+          } else {
+            const bcf  = cf - SPIN_FRAMES;             // frames since the bar began
+            const lvl  = chargeLevel(chargePct);
+            const full = chargePct >= 100;
+            // The fill frontier sweeps from the top out to `lvl`, one petal per
+            // ~0.5s, then holds there. Petals behind it are fully grown.
+            const step = (bcf / CHARGE_SPF) | 0;
+            const ff       = full ? 12 : Math.min(1 + step, lvl);  // leading petal
+            const solidMax = full ? 12 : ff - 1;                   // last grown petal
+            let clone = null, ang = 0;
+            for (let pos = 1; pos <= solidMax; pos++) {
+                const ar = -(pos - 1) * STEP;
+                if (!clone) clone = f0.clone().rotate(ar, fpx, fpy);
+                else        clone.rotate(ar - ang, fpx, fpy);
+                ang = ar;
+                render.begin(); render.drawDCI(clone, CX - fpx, CY - fpy); render.end();
+            }
+            // Leading petal: growing in while the frontier advances, then pulsing
+            // (0-1-2-1…) in place to show it's still charging. Skipped when full.
+            if (!full) {
+                const reached = (1 + step) >= lvl;
+                let gfr;
+                if (!reached) gfr = bcf % CHARGE_SPF;         // 0->1->2 growing in
+                else { const c = cf & 3; gfr = c < 3 ? c : 1; } // pulse 0,1,2,1
+                const gd = loadDCI(RES[R_GROW + gfr]);
+                if (gd) {
+                    const gx = gd.width >> 1, gy = gd.height;
+                    const c = gd.clone().rotate(-(ff - 1) * STEP, gx, gy);
+                    render.begin(); render.drawDCI(c, CX - gx, CY - gy); render.end();
+                }
+            }
+          }
+        }
+        // Center face — the flower's smiley (fixed cheerful set).
+        const cface = faceSet.length ? faceSet[0] : null;
+        if (cface) {
+            render.begin();
+            render.drawDCI(cface, CX - (cface.width >> 1), CY - (cface.height >> 1));
+            render.end();
+        }
+        return;
+    }
+
     // Layer 2: petals. Each petal's frame is offset by its position, so
     // up to three distinct frames are on screen at once. One clone per
     // frame IMAGE in use — petals sharing a frame reuse its chain,
@@ -769,13 +888,37 @@ class AppBehavior extends Behavior {
         // kept for the app's life (the runtime allows only one instance;
         // close+reopen of sensors has proven fatal — see requestLocation).
         try { accel = new Accelerometer({ onTap: startAnim }); } catch(e) {}
+        // Charging state. Subscribe before app_message (like the accelerometer,
+        // the battery service allocates from the app heap). onSample fires on
+        // every battery change; setCharging only acts when the flag flips.
+        try {
+            battery = new Battery({
+                onSample() {
+                    try {
+                        const s = this.sample();
+                        chargePct = s.percent;        // fill level follows the battery
+                        setCharging(s.charging);
+                    } catch(e) {}
+                }
+            });
+        } catch(e) {}
         openMessageChannel();
 
         loadCachedWeather();
         loadFaceSet(petalCount());   // face tracks how many petals remain
         drawScreen();
         requestLocation();
-        startAnim();    // launching the face means the user is looking
+
+        // Apply the initial charging state — onSample only fires on CHANGE, so
+        // sample() once here. If already on the charger, start the loader;
+        // otherwise begin the normal look (launching = the user is looking).
+        let chgNow = false;
+        try {
+            const s = battery && battery.sample();
+            if (s) { chgNow = !!s.charging; chargePct = s.percent; }
+        } catch(e) {}
+        if (chgNow) setCharging(true);
+        else        startAnim();
 
         watch.addEventListener("minutechange", clock => {
             const h = clock.date.getHours();
