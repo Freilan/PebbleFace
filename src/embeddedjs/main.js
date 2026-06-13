@@ -725,7 +725,11 @@ function drawScreen(event) {
             // oldest FALLS off the trailing edge, solid petals in between — the
             // original "growing and shedding" loader, one petal per ~0.33s.
             const sstep = (cf / SPIN_SPF) | 0;          // 0..11 over one lap
-            const fis   = cf % SPIN_SPF;                // grow/fall frame in the step
+            const fis   = cf % SPIN_SPF;                // sub-step within this petal
+            // Map the SPIN_SPF sub-steps across the full 0..2 grow/fall frames
+            // so the animation always reaches its LAST frame (completes). With
+            // SPIN_SPF=2 that's frames 0 then 2 — sprout->full, attached->gone.
+            const frm   = SPIN_SPF > 1 ? Math.round(fis / (SPIN_SPF - 1) * 2) : 0;
             const head  = sstep % 12;                   // leading position (0-based)
             const posOf = i => ((i % 12) + 12) % 12 + 1;
             // Solid middle petals: head-1 .. head-(SPIN_ARC-1).
@@ -739,14 +743,14 @@ function drawScreen(event) {
                 render.begin(); render.drawDCI(clone, CX - fpx, CY - fpy); render.end();
             }
             // Newest petal growing in at the leading edge.
-            const gd = loadDCI(RES[R_GROW + fis]);
+            const gd = loadDCI(RES[R_GROW + frm]);
             if (gd) {
                 const gx = gd.width >> 1, gy = gd.height;
                 const c = gd.clone().rotate(-(posOf(head) - 1) * STEP, gx, gy);
                 render.begin(); render.drawDCI(c, CX - gx, CY - gy); render.end();
             }
             // Oldest petal falling off the trailing edge.
-            const dd = loadDCI(RES[R_FALL + fis]);
+            const dd = loadDCI(RES[R_FALL + frm]);
             if (dd) {
                 const dx = dd.width >> 1, dy = dd.height;
                 const c = dd.clone().rotate(-(posOf(head - SPIN_ARC) - 1) * STEP, dx, dy);
