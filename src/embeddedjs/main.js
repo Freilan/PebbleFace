@@ -345,9 +345,11 @@ function startAnim() {
 // petal keeps pulsing through the grow frames to show it's actively charging;
 // nothing falls (a fill bar, not a spinner). Plugged in, so animating is free.
 const CHARGE_FRAME_MS = 167;   // ~0.5s per petal (CHARGE_SPF grow frames each)
-const CHARGE_SPF      = 3;     // animation frames per petal
-const SPIN_FRAMES     = 12 * CHARGE_SPF;  // one-lap spin-up flourish, CHARGE_SPF frames/step
+const CHARGE_SPF      = 3;     // animation frames per petal in the fill bar
+const SPIN_SPF        = 2;     // frames per petal during the spin-up (quicker than the bar)
+const SPIN_FRAMES     = 12 * SPIN_SPF;    // one-lap spin-up flourish (~4s)
 const SPIN_ARC        = 3;     // width of the spinning comet (grow + solids + fall)
+const CHARGE_FACE_SPF = 4;     // smiley flips between its two frames every ~0.67s
 let charging    = false;
 let chargeTimer = null;
 let chargePct   = 0;           // 0..100, from the battery sensor
@@ -721,9 +723,9 @@ function drawScreen(event) {
             // Spin-up flourish: a comet sweeps clockwise once around before the
             // bar settles. The newest petal GROWS in at the leading edge, the
             // oldest FALLS off the trailing edge, solid petals in between — the
-            // original "growing and shedding" loader, one petal per ~0.5s.
-            const sstep = (cf / CHARGE_SPF) | 0;        // 0..11 over one lap
-            const fis   = cf % CHARGE_SPF;              // grow/fall frame in the step
+            // original "growing and shedding" loader, one petal per ~0.33s.
+            const sstep = (cf / SPIN_SPF) | 0;          // 0..11 over one lap
+            const fis   = cf % SPIN_SPF;                // grow/fall frame in the step
             const head  = sstep % 12;                   // leading position (0-based)
             const posOf = i => ((i % 12) + 12) % 12 + 1;
             // Solid middle petals: head-1 .. head-(SPIN_ARC-1).
@@ -783,8 +785,10 @@ function drawScreen(event) {
             }
           }
         }
-        // Center face — the flower's smiley (fixed cheerful set).
-        const cface = faceSet.length ? faceSet[0] : null;
+        // Center face — the cheerful set, oscillating between its two frames
+        // throughout charging so the smiley looks alive.
+        const fIdx = faceSet.length > 1 ? (((cf / CHARGE_FACE_SPF) | 0) % faceSet.length) : 0;
+        const cface = faceSet.length ? faceSet[fIdx] : null;
         if (cface) {
             render.begin();
             render.drawDCI(cface, CX - (cface.width >> 1), CY - (cface.height >> 1));
