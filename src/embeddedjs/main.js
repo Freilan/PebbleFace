@@ -346,8 +346,8 @@ function startAnim() {
 // nothing falls (a fill bar, not a spinner). Plugged in, so animating is free.
 const CHARGE_FRAME_MS = 167;   // ~0.5s per petal (CHARGE_SPF grow frames each)
 const CHARGE_SPF      = 3;     // animation frames per petal
-const SPIN_FRAMES     = 12;    // a one-lap spin-up flourish before the bar fills (~2s)
-const SPIN_ARC        = 3;     // petals in the spinning comet
+const SPIN_FRAMES     = 12 * CHARGE_SPF;  // one-lap spin-up flourish, CHARGE_SPF frames/step
+const SPIN_ARC        = 3;     // width of the spinning comet (grow + solids + fall)
 let charging    = false;
 let chargeTimer = null;
 let chargePct   = 0;           // 0..100, from the battery sensor
@@ -718,17 +718,37 @@ function drawScreen(event) {
             const f0 = petalFrames[0];
             const fpx = f0.width >> 1, fpy = f0.height;
           if (cf < SPIN_FRAMES) {
-            // Spin-up flourish: a short comet of petals sweeps clockwise once
-            // around the whole circle before the bar settles to the charge level.
-            const head = cf % 12;                       // leading position (0-based)
+            // Spin-up flourish: a comet sweeps clockwise once around before the
+            // bar settles. The newest petal GROWS in at the leading edge, the
+            // oldest FALLS off the trailing edge, solid petals in between — the
+            // original "growing and shedding" loader, one petal per ~0.5s.
+            const sstep = (cf / CHARGE_SPF) | 0;        // 0..11 over one lap
+            const fis   = cf % CHARGE_SPF;              // grow/fall frame in the step
+            const head  = sstep % 12;                   // leading position (0-based)
+            const posOf = i => ((i % 12) + 12) % 12 + 1;
+            // Solid middle petals: head-1 .. head-(SPIN_ARC-1).
             let clone = null, ang = 0;
-            for (let d = 0; d < SPIN_ARC; d++) {
-                const pos = ((head - d) % 12 + 12) % 12 + 1;
+            for (let d = 1; d < SPIN_ARC; d++) {
+                const pos = posOf(head - d);
                 const ar  = -(pos - 1) * STEP;
                 if (!clone) clone = f0.clone().rotate(ar, fpx, fpy);
                 else        clone.rotate(ar - ang, fpx, fpy);
                 ang = ar;
                 render.begin(); render.drawDCI(clone, CX - fpx, CY - fpy); render.end();
+            }
+            // Newest petal growing in at the leading edge.
+            const gd = loadDCI(RES[R_GROW + fis]);
+            if (gd) {
+                const gx = gd.width >> 1, gy = gd.height;
+                const c = gd.clone().rotate(-(posOf(head) - 1) * STEP, gx, gy);
+                render.begin(); render.drawDCI(c, CX - gx, CY - gy); render.end();
+            }
+            // Oldest petal falling off the trailing edge.
+            const dd = loadDCI(RES[R_FALL + fis]);
+            if (dd) {
+                const dx = dd.width >> 1, dy = dd.height;
+                const c = dd.clone().rotate(-(posOf(head - SPIN_ARC) - 1) * STEP, dx, dy);
+                render.begin(); render.drawDCI(c, CX - dx, CY - dy); render.end();
             }
           } else {
             const bcf  = cf - SPIN_FRAMES;             // frames since the bar began
