@@ -10,26 +10,6 @@ import Location from "embedded:sensor/Location";
 import Accelerometer from "embedded:sensor/Accelerometer";
 import Battery from "embedded:sensor/Battery";
 import Message from "pebble/message";
-import Instrumentation from "instrumentation";
-
-// ── Memory telemetry (keep until the petal fall is verified) ──
-// One-line snapshot, cheap enough to run during animation ticks.
-let iFree = 0, iSlot = 0, iChunk = 0, iGC = 0;
-try {
-    iFree  = Instrumentation.map("System Free Memory");
-    iSlot  = Instrumentation.map("XS Slot Heap Used");
-    iChunk = Instrumentation.map("XS Chunk Heap Used");
-    iGC    = Instrumentation.map("XS Garbage Collection Count");
-} catch(e) {}
-function memLine(tag) {
-    if (!iFree) return;
-    try {
-        trace("[T ", tag, "] free=", Instrumentation.get(iFree),
-              " slot=", Instrumentation.get(iSlot),
-              " chunk=", Instrumentation.get(iChunk),
-              " gc=", Instrumentation.get(iGC), "\n");
-    } catch(e) {}
-}
 
 const render = new Poco(screen);
 
@@ -160,7 +140,6 @@ if (!RES || RES.length < R_LEN) {
         }
     }
     if (!RES) {
-        trace("[RES] fingerprint scan\n");
         const FP = {};                        // (w<<8)|h -> table index
         for (let i = 0; i < 3; i++) FP[((60 + i) << 8) | 130] = R_PETAL + i;
         for (let i = 0; i < 3; i++) FP[((63 + i) << 8) | 130] = R_FALL + i;
@@ -202,8 +181,6 @@ for (let i = 0; i < 3; i++) {
     const f = loadDCI(RES[R_PETAL + i]);
     if (f) petalFrames.push(f);
 }
-if (!petalFrames.length || petalFrames[0].height < 100 || petalFrames[0].width < 55)
-    trace("[RES] id table looks wrong (petal_1 isn't ~60x130)\n");
 const beeDCI = loadDCI(RES[R_BEE]);
 const P_PX   = petalFrames.map(f => f.width >> 1);
 const P_PY   = petalFrames.map(f => f.height);
@@ -231,7 +208,6 @@ function loadFaceSet(count) {
         // rescans. Keep drawing the wrong-but-loadable art meanwhile; a
         // blank face would be worse.
         if (img.width !== 104 + si || img.height !== 106 + f) {
-            trace("[RES] face set ", si, " frame ", f, " has wrong art — resmap stale, will rescan\n");
             try { localStorage.setItem("resmap2", "[]"); } catch(e) {}
         }
         faceSet.push(img);
@@ -322,7 +298,6 @@ function animTick() {
     // always fits the 14KB pool even at the fetch's ~11KB live peak —
     // an over-pool chunk allocation aborts rather than throws.
     try { new ArrayBuffer(2048); } catch(e) {}
-    if (!(tickCount & 3)) memLine(tickCount);
 }
 
 function startAnim() {
@@ -333,7 +308,6 @@ function startAnim() {
         currentH24 = (currentH24 + DEMO_HOURS_PER_CHECK) % 24;
         saveFlowerState();
     }
-    trace("[CHK] check: now=", currentH24, " shown=", shownH24, "\n");
     catchUp();    // the user is looking — play any missed petal transitions
 }
 
@@ -370,7 +344,6 @@ function chargeTick() {
     cf++;
     drawScreen();
     try { new ArrayBuffer(2048); } catch(e) {}    // same GC nudge as the anim loop
-    if (!(cf & 15)) memLine(cf);                   // monitor a long charge
 }
 
 function setCharging(on) {
@@ -383,12 +356,10 @@ function setCharging(on) {
         if (casTimer) endCascade();               // abandon any catch-up cascade
         loadFaceSet(12);                          // cheerful full-flower face
         chargeTimer = Timer.repeat(chargeTick, CHARGE_FRAME_MS);
-        trace("[BAT] charging — loader on\n");
         drawScreen();
     } else {
         if (chargeTimer) { Timer.clear(chargeTimer); chargeTimer = null; }
         loadFaceSet(petalCount());                // back to the real face
-        trace("[BAT] unplugged — loader off\n");
         drawScreen();
         startAnim();                              // unplugged — user is likely looking
     }
@@ -448,7 +419,6 @@ function casTick() {
             saveFlowerState();
             loadFaceSet(petalCount());            // face follows the flower
             if (s.grow) hideSet.push(s.pos);      // the overlay draws it now
-            trace("[CHK] ", s.grow ? "grow" : "fall", " pos=", s.pos, " shown=", s.target, "\n");
         }
         const fr = (local / FRAME_MS) | 0;
         if (fr >= STEP_FRAMES) {                  // this petal finished
@@ -548,8 +518,8 @@ function openMessageChannel() {
             input: 2048, output: 1024,
             keys: SETTINGS_KEYS,
             onReadable() {
-                try { applySettings(this.read()); trace("[CFG] settings applied\n"); }
-                catch(e) { trace("[CFG] apply failed ", String(e), "\n"); }
+                try { applySettings(this.read()); }
+                catch(e) {}
             }
         });
     } catch(e) {}
@@ -605,7 +575,6 @@ let locating = false;
 function requestLocation() {
     if (locating) return;
     locating = true;
-    trace("[WX] locating\n");
     try {
         new Location({
             onSample() {
@@ -613,7 +582,6 @@ function requestLocation() {
                 try {
                     const s = this.sample();
                     this.close();
-                    trace("[WX] got location\n");
                     fetchWeather(s.latitude, s.longitude);
                 } catch(e) {}
             }
@@ -623,8 +591,6 @@ function requestLocation() {
 
 async function fetchWeather(lat, lon) {
     try {
-        trace("[WX] fetching\n");
-        memLine("fetch");
         const u = useFahrenheit ? "&temperature_unit=fahrenheit" : "";
         const url = "http://api.open-meteo.com/v1/forecast"
             + "?latitude=" + lat + "&longitude=" + lon
@@ -641,12 +607,10 @@ async function fetchWeather(lat, lon) {
             localStorage.setItem("weather", JSON.stringify(weather));
             localStorage.setItem("weatherTime", String(Date.now()));
         } catch(e) {}
-        trace("[WX] applied\n");
-        memLine("applied");
         // While an animation/cascade runs, the next tick repaints shortly —
         // skip the extra draw at this (heaviest) moment.
         if (!animTimer && !casTimer) drawScreen();
-    } catch(e) { trace("[WX] failed ", String(e), "\n"); }
+    } catch(e) {}
 }
 
 // ── strokeText ────────────────────────────────────────────────
