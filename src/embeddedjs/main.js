@@ -124,67 +124,38 @@ let RES = null;
 try { RES = new Uint8Array(Natives.ids); } catch(e) {}
 trace("[RES] natives=", RES ? RES.length : -1, " need=", R_LEN, "\n");  // TEMP diag
 if (!RES || RES.length < R_LEN) {
-    // FFI table unavailable (firmware may predate the fxBuildFFI hook).
-    // Identify resources by viewbox FINGERPRINT instead: every PDC in the
-    // repo carries a unique (width, height), stamped by tools/tag_pdcs.py
-    // (re-run it whenever art is added/replaced; keep its table in sync
-    // with FP below). The mapping is fixed per build, so cache it and
-    // verify anchors each launch; a new build fails the check and rescans.
-    // Key is "resmap2": v1 maps were validated by petal_1+bee alone, which
-    // let stale FACE ids through (wrong face art on screen) — the bump
-    // discards every v1 cache in the wild.
-    try {
-        const c = JSON.parse(localStorage.getItem("resmap2"));
-        if (c && c.length >= R_LEN) RES = c;
-    } catch(e) {}
-    if (RES) {
-        // One anchor per art block — petal, fall, grow, the face block's
-        // two ENDS, and the bee. Rebuilds reorder ids in blocks/rotations,
-        // so endpoint drift catches shifts a 2-anchor check would miss.
-        const chk = [
-            [R_PETAL,      60, 130],   // petal_1
-            [R_FALL,       63, 130],   // petal_fall_1
-            [R_GROW,       50, 130],   // petal_grow_1
-            [R_FACE,      104, 106],   // face_12_11_1 (face block start)
-            [R_FACE + 11, 109, 107],   // face_2_1_2   (face block end)
-            [R_BEE,        50,  50],   // bee
-        ];
-        for (let i = 0; RES && i < chk.length; i++) {
-            const d = loadDCI(RES[chk[i][0]]);
-            if (!d || d.width !== chk[i][1] || d.height !== chk[i][2])
-                RES = null;                   // stale build — rescan
+    // No FFI table on this firmware (Natives absent — confirmed by the [RES]
+    // trace). The build's resource ball is EXACT media order in this toolchain
+    // (verified against the build's resource_ball line), so map each table slot
+    // straight to its media-order id. This replaces the old viewbox-fingerprint
+    // scan, which loaded EVERY resource in one job — fine at ~28, but it OOM'd
+    // (reboot loop) once the 33 Yoshi PDCs pushed the count past 60, and it
+    // could not tell the 32 same-size Yoshi heads apart anyway. Media order is
+    // assigned here in the same sequence as package.json "media".
+    RES = new Array(R_LEN);
+    let id = 1;
+    for (let i = 0; i < 6;  i++) RES[R_WX    + i] = id++;  // weather icons  1-6
+    for (let i = 0; i < 3;  i++) RES[R_PETAL + i] = id++;  // petals         7-9
+    for (let i = 0; i < 3;  i++) RES[R_FALL  + i] = id++;  // falls          10-12
+    for (let i = 0; i < 3;  i++) RES[R_GROW  + i] = id++;  // grows          13-15
+    for (let i = 0; i < 12; i++) RES[R_FACE  + i] = id++;  // faces          16-27
+    RES[R_BEE] = id++;                                     // bee            28
+    for (let i = 0; i < 32; i++) RES[R_YOSHI + i] = id++;  // yoshi heads    29-60
+    RES[R_TONGUE] = id++;                                  // tongue         61
+    // Anchor check: if the resource ball is ever NOT media order, these sizes
+    // won't match — the face would draw wrong art, and this line says why.
+    // (Only 3 decodes, so no scan-style OOM.)
+    const chk = [[R_PETAL, 60, 130], [R_BEE, 50, 50], [R_FACE, 104, 106]];
+    for (let i = 0; i < chk.length; i++) {
+        const d = loadDCI(RES[chk[i][0]]);
+        if (!d || d.width !== chk[i][1] || d.height !== chk[i][2]) {
+            trace("[RES] media-order anchor FAILED slot=", chk[i][0],
+                  " got=", d ? (d.width + "x" + d.height) : "null", "\n");
+            break;
         }
     }
-    if (!RES) {
-        const FP = {};                        // (w<<8)|h -> table index
-        for (let i = 0; i < 3; i++) FP[((60 + i) << 8) | 130] = R_PETAL + i;
-        for (let i = 0; i < 3; i++) FP[((63 + i) << 8) | 130] = R_FALL + i;
-        for (let i = 0; i < 3; i++) FP[((50 + i) << 8) | 130] = R_GROW + i;
-        for (let s = 0; s < 6; s++)
-            for (let f = 0; f < 2; f++)
-                FP[((104 + s) << 8) | (106 + f)] = R_FACE + s * 2 + f;
-        FP[(50 << 8) | 50] = R_BEE;
-        FP[(40 << 8) | 30] = R_WX;            // cloudy
-        FP[(45 << 8) | 40] = R_WX + 1;        // pcloudy
-        FP[(40 << 8) | 40] = R_WX + 2;        // clear
-        FP[(40 << 8) | 41] = R_WX + 3;        // rain
-        FP[(41 << 8) | 40] = R_WX + 4;        // snow
-        FP[(42 << 8) | 40] = R_WX + 5;        // storm
-        RES = new Array(R_LEN).fill(1);
-        for (let id = 1; id <= R_LEN + 1; id++) {  // last id = icon.png,
-            const dci = loadDCI(id);               // fails; never scan past
-            if (!dci) continue;                    // the table (hard-faults)
-            const idx = FP[(dci.width << 8) | dci.height];
-            if (idx !== undefined) RES[idx] = id;
-        }
-        try { localStorage.setItem("resmap2", JSON.stringify(RES)); } catch(e) {}
-    }
-    // The scan/anchor decodes sit on the app heap, WeakRef-pinned until
-    // this job ends — free them from a fresh job via chunk pressure
-    // (small asks only: an over-pool chunk ask aborts).
-    Timer.set(() => {
-        try { for (let i = 0; i < 6; i++) new ArrayBuffer(2048); } catch(e) {}
-    });
+    // Free the anchor decodes from a fresh job (WeakRef-pinned until job end).
+    Timer.set(() => { try { for (let i = 0; i < 3; i++) new ArrayBuffer(2048); } catch(e) {} });
 }
 
 // Resident images: the 3 petal idle frames, the bee, and the current face
