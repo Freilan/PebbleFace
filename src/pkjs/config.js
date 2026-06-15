@@ -67,6 +67,34 @@ module.exports = [
     ]
   },
   {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Yoshi" },
+      {
+        "type": "text",
+        "defaultValue": "Replace the center face and bee with Yoshi: his tongue points at the minutes and he turns to face them."
+      },
+      {
+        "type": "toggle",
+        "messageKey": "YoshiMode",
+        "label": "Yoshi Mode",
+        "defaultValue": false
+      },
+      {
+        "type": "radiogroup",
+        "messageKey": "YoshiColor",
+        "label": "Yoshi Color",
+        "defaultValue": 0,
+        "options": [
+          { "label": "Green",      "value": 0 },
+          { "label": "Light Blue", "value": 1 },
+          { "label": "Red",        "value": 2 },
+          { "label": "Yellow",     "value": 3 }
+        ]
+      }
+    ]
+  },
+  {
     "type": "submit",
     "defaultValue": "Save"
   }

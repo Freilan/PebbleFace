@@ -38,6 +38,7 @@ function colorFromInt(v) {
 let bgInt = 0x55FFAA, dotInt = 0x00AA55;
 let showDots = true, showDate = true, showWeather = true;
 let useFahrenheit = true;
+let yoshiMode = false, yoshiColor = 0;   // Yoshi center (off by default), color 0..3
 try {
     const s = JSON.parse(localStorage.getItem("settings"));
     if (s) {
@@ -47,6 +48,8 @@ try {
         if (typeof s.showDate      === "boolean") showDate      = s.showDate;
         if (typeof s.showWeather   === "boolean") showWeather   = s.showWeather;
         if (typeof s.useFahrenheit === "boolean") useFahrenheit = s.useFahrenheit;
+        if (typeof s.yoshiMode     === "boolean") yoshiMode     = s.yoshiMode;
+        if (typeof s.yoshiColor    === "number")  yoshiColor    = s.yoshiColor;
     }
 } catch(e) {}
 let C_BG  = colorFromInt(bgInt);
@@ -62,6 +65,14 @@ const BEE_R       = Math.round(W * 0.44);
 const TWO_PI      = Math.PI * 2;
 const DOT_GRID    = 27;
 const DOT_R_SQ    = 126 * 126;
+
+// ── Yoshi-mode geometry (tune on-device — trial-and-error) ────
+// The head image is centered slightly above the watch center so Yoshi's mouth
+// (the tongue's pivot) lands just below center. The tongue rotates about that
+// mouth point to follow the minute. All offsets are in pixels from (CX, CY).
+const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = -16;  // head image-center offset
+const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 6;    // mouth = tongue pivot (below center)
+const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
 
 function petalAnchor(clockDeg) {
     const rad = (clockDeg - 90) * Math.PI / 180;
@@ -88,9 +99,13 @@ const R_GROW  = 6;     // petal_grow_1..3 (AM bloom transition)
 const R_FACE  = 9;     // 6 sets x 2 frames, set-major: 12_11 .. 2_1
 const R_BEE   = 21;
 const R_WX    = 22;    // cloudy, pcloudy, clear, rain, snow, storm
-const R_LEN   = 28;    // table entries; media count is R_LEN + 1 (icon.png)
+const R_YOSHI = 28;    // Yoshi heads, color-major: 4 colors x 8 directions
+                       //   id = R_YOSHI + color*8 + dir  (color 0..3, dir 0..7)
+const R_TONGUE = 60;   // single shared tongue (rotated to the minute)
+const R_LEN   = 61;    // table entries; media count is R_LEN + 1 (icon.png)
 const FACE_FRAMES = 2; // frames per face set
 const N_SETS  = 6;
+const YOSHI_DIRS = 8;  // directional head images per color
 const WX_OFFSET = {    // weather desc -> offset from R_WX
     "Cloudy":    0,
     "P. Cloudy": 1,
@@ -264,6 +279,10 @@ const FACE_TICKS = 4;      // face frame advances ~1x/sec
 let tickCount = 0, animLeft = 0, animTimer = null;
 let accel = null;          // keep the instance alive — GC would unsubscribe tap
 let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
+// Yoshi-mode caches: head reloaded only when color*8+dir changes; tongue loaded
+// once and re-rotated per minute (mirrors the bee). Memory-neutral vs face+bee.
+let yoshiHead = null, yoshiHeadKey = -1;
+let tongueDCI = null, tongueClone = null, tongueCloneMin = -1;
 
 // Each petal is offset by its position, so the resting flower is already
 // varied (frames 0,1,2,0,… around the wheel) and during the animation
@@ -474,13 +493,16 @@ const SETTINGS_KEYS = [
     "ShowDate",          // 10003  toggle
     "ShowWeather",       // 10004  toggle
     "TemperatureUnit",   // 10005  toggle (on = Fahrenheit)
+    "YoshiMode",         // 10006  toggle
+    "YoshiColor",        // 10007  selection 0..3 (green, lblue, red, yellow)
 ];
 
 function persistSettings() {
     try {
         localStorage.setItem("settings", JSON.stringify({
             bg: bgInt, dot: dotInt,
-            showDots, showDate, showWeather, useFahrenheit
+            showDots, showDate, showWeather, useFahrenheit,
+            yoshiMode, yoshiColor
         }));
     } catch(e) {}
 }
@@ -499,6 +521,12 @@ function applySettings(map) {
             useFahrenheit = next;                // displayed temp updates now,
             requestLocation();                   // not at the next hourly fetch
         }
+    }
+    if (map.has("YoshiMode"))  yoshiMode = !!map.get("YoshiMode");
+    if (map.has("YoshiColor")) {
+        let c = Number(map.get("YoshiColor")) | 0;
+        yoshiColor = c < 0 ? 0 : (c > 3 ? 3 : c);
+        yoshiHeadKey = -1;                       // force the head to reload
     }
     persistSettings();
     drawScreen();
@@ -801,28 +829,59 @@ function drawScreen(event) {
         }
     }
 
-    // Layer 3: face + bee + text + weather icon. The bee's angle only
-    // changes on the minute, so its rotated clone is cached — re-cloning
-    // it every animation tick was pure app-heap churn.
-    const minutes  = now.getMinutes();
-    const beeAngle = (minutes / 60) * TWO_PI;
-    const beeX     = Math.round(CX + BEE_R * Math.sin(beeAngle));
-    const beeY     = Math.round(CY - BEE_R * Math.cos(beeAngle));
-    if (beeDCI && minutes !== beeCloneMin) {
-        beeCloneMin = minutes;
-        beeClone = beeDCI.clone().rotate(Math.PI - beeAngle, BEE_PX, BEE_PY);
-    }
-    const bd = beeClone;
-
-    // Face: current set's frame, advancing ~1x/sec during the animation
-    // window (resident — drawn straight from the set, no clone).
-    const face = faceSet.length
-        ? faceSet[(animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0]
-        : null;
+    // Layer 3: the center (Yoshi OR face+bee) + text + weather icon.
+    const minutes = now.getMinutes();
 
     render.begin();
-    if (face) render.drawDCI(face, CX - (face.width >> 1), CY - (face.height >> 1));
-    if (bd) render.drawDCI(bd, beeX - BEE_PX, beeY - BEE_PY);
+    if (yoshiMode) {
+        // Yoshi head facing the nearest of 8 directions toward the minute, with
+        // a tongue rotated to the exact minute. Head reloaded only on a color/
+        // direction change; tongue re-rotated once per minute (like the bee).
+        const dir = Math.round(minutes / 60 * YOSHI_DIRS) % YOSHI_DIRS;
+        const key = yoshiColor * YOSHI_DIRS + dir;
+        if (key !== yoshiHeadKey) {
+            yoshiHeadKey = key;
+            yoshiHead = loadDCI(RES[R_YOSHI + key]);
+        }
+        if (!tongueDCI) tongueDCI = loadDCI(RES[R_TONGUE]);
+        if (tongueDCI && minutes !== tongueCloneMin) {
+            tongueCloneMin = minutes;
+            const ang = (minutes / 60) * TWO_PI;       // 0 = up, clockwise
+            // Pivot at the tongue art's bottom-center (its root). Tune the angle
+            // form here if the art's orientation differs.
+            tongueClone = tongueDCI.clone()
+                .rotate(-ang, tongueDCI.width >> 1, tongueDCI.height);
+        }
+        const mouthX = CX + YOSHI_PIVOT_DX, mouthY = CY + YOSHI_PIVOT_DY;
+        const head = yoshiHead;
+        const drawHead = () => {
+            if (head) render.drawDCI(head,
+                CX + YOSHI_HEAD_DX - (head.width  >> 1),
+                CY + YOSHI_HEAD_DY - (head.height >> 1));
+        };
+        const drawTongue = () => {
+            if (tongueClone) render.drawDCI(tongueClone,
+                mouthX - (tongueDCI.width >> 1), mouthY - tongueDCI.height);
+        };
+        if (YOSHI_TONGUE_DRAW_FIRST) { drawTongue(); drawHead(); }
+        else                         { drawHead(); drawTongue(); }
+    } else {
+        // Bee minute-hand + center smiley face (the default). Bee's angle only
+        // changes on the minute, so its rotated clone is cached.
+        const beeAngle = (minutes / 60) * TWO_PI;
+        const beeX     = Math.round(CX + BEE_R * Math.sin(beeAngle));
+        const beeY     = Math.round(CY - BEE_R * Math.cos(beeAngle));
+        if (beeDCI && minutes !== beeCloneMin) {
+            beeCloneMin = minutes;
+            beeClone = beeDCI.clone().rotate(Math.PI - beeAngle, BEE_PX, BEE_PY);
+        }
+        // Face: current set's frame, advancing ~1x/sec during the anim window.
+        const face = faceSet.length
+            ? faceSet[(animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0]
+            : null;
+        if (face) render.drawDCI(face, CX - (face.width >> 1), CY - (face.height >> 1));
+        if (beeClone) render.drawDCI(beeClone, beeX - BEE_PX, beeY - BEE_PY);
+    }
 
     let w, a;
 
