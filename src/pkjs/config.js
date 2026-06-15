@@ -84,12 +84,12 @@ module.exports = [
         "type": "radiogroup",
         "messageKey": "YoshiColor",
         "label": "Yoshi Color",
-        "defaultValue": 0,
+        "defaultValue": "0",
         "options": [
-          { "label": "Green",      "value": 0 },
-          { "label": "Light Blue", "value": 1 },
-          { "label": "Red",        "value": 2 },
-          { "label": "Yellow",     "value": 3 }
+          { "label": "Green",      "value": "0" },
+          { "label": "Light Blue", "value": "1" },
+          { "label": "Red",        "value": "2" },
+          { "label": "Yellow",     "value": "3" }
         ]
       }
     ]
