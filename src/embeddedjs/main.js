@@ -122,6 +122,7 @@ function loadDCI(id) {
 
 let RES = null;
 try { RES = new Uint8Array(Natives.ids); } catch(e) {}
+trace("[RES] natives=", RES ? RES.length : -1, " need=", R_LEN, "\n");  // TEMP diag
 if (!RES || RES.length < R_LEN) {
     // FFI table unavailable (firmware may predate the fxBuildFFI hook).
     // Identify resources by viewbox FINGERPRINT instead: every PDC in the
