@@ -9,10 +9,12 @@
 // cannot be satisfied ABORTS the app — 14KB keeps the fetch peak clear.
 // GC cadence is driven explicitly by the animation loop (see animTick).
 // Slot: holds JS objects/closures + the preloaded module set. The mod grew
-// (settings, the catch-up cascade, charging mode + the Battery module, then
-// Yoshi mode), aborting at LOAD with "Slot allocation: failed in fixed size
-// heap" — raised 28672 -> 36864 -> 49152 as it grew. Pulled from the app heap
-// (~103KB free at entry), which has the slack; the chunk pool must stay generous.
+// (settings, cascade, charging + Battery, then Yoshi), aborting at LOAD with
+// "Slot allocation: failed in fixed size heap". BALANCE: too small fails at
+// load; too LARGE starves the app heap so the animation OOMs ~0.5s in (49152
+// did exactly that). 40960 is the sweet spot — enough for the (media-order,
+// no longer scan-heavy) mod to load, while leaving the runtime heap the
+// per-tick clones need. Pulled from the app heap; chunk pool stays generous.
 typedef struct {
   uint32_t recordSize;
   uint32_t stack;   // bytes
@@ -129,7 +131,7 @@ int main(void) {
   MdblCreationRecord cr = {
     .recordSize = sizeof(MdblCreationRecord),
     .stack = 6144,
-    .slot  = 49152,
+    .slot  = 40960,
     .chunk = 14336,
     .flags = 0,
     .fxBuildFFI = (void *)prv_build_ffi,
