@@ -823,10 +823,11 @@ function drawScreen(event) {
         if (tongueDCI && minutes !== tongueCloneMin) {
             tongueCloneMin = minutes;
             const ang = (minutes / 60) * TWO_PI;       // 0 = up, clockwise
-            // Pivot at the tongue art's bottom-center (its root). Tune the angle
-            // form here if the art's orientation differs.
+            // Pivot at the tongue art's bottom-center (its root). Math.PI - ang
+            // (same form as the bee) so the BALL end points outward at the
+            // minute; plain -ang put the ball at the mouth (180 deg off).
             tongueClone = tongueDCI.clone()
-                .rotate(-ang, tongueDCI.width >> 1, tongueDCI.height);
+                .rotate(Math.PI - ang, tongueDCI.width >> 1, tongueDCI.height);
         }
         const mouthX = CX + YOSHI_PIVOT_DX, mouthY = CY + YOSHI_PIVOT_DY;
         const head = yoshiHead;
