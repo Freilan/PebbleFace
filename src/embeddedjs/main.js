@@ -104,9 +104,8 @@ const R_BEE   = 21;
 const R_WX    = 22;    // cloudy, pcloudy, clear, rain, snow, storm
 const R_YOSHI = 28;    // Yoshi heads, color-major: 4 colors x 8 directions
                        //   id = R_YOSHI + color*8 + dir  (color 0..3, dir 0..7)
-const R_TONGUE = 60;   // long tongue (used pointing into the top half)
-const R_TONGUE_SHORT = 61;  // short tongue (used pointing into the bottom half)
-const R_LEN   = 62;    // table entries; media count is R_LEN + 1 (icon.png)
+const R_TONGUE = 60;   // single shared tongue (rotated to the minute)
+const R_LEN   = 61;    // table entries; media count is R_LEN + 1 (icon.png)
 const FACE_FRAMES = 2; // frames per face set
 const N_SETS  = 6;
 const YOSHI_DIRS = 8;  // directional head images per color
@@ -146,7 +145,6 @@ if (!RES || RES.length < R_LEN) {
     RES[R_BEE] = id++;                                     // bee            28
     for (let i = 0; i < 32; i++) RES[R_YOSHI + i] = id++;  // yoshi heads    29-60
     RES[R_TONGUE] = id++;                                  // tongue         61
-    RES[R_TONGUE_SHORT] = id++;                            // tongue_short   62
     // Anchor check: if the resource ball is ever NOT media order, these sizes
     // won't match — the face would draw wrong art, and this line says why.
     // (Only 3 decodes, so no scan-style OOM.)
@@ -263,7 +261,7 @@ let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
 // Yoshi-mode caches: head reloaded only when color*8+dir changes; tongue loaded
 // once and re-rotated per minute (mirrors the bee). Memory-neutral vs face+bee.
 let yoshiHead = null, yoshiHeadKey = -1;
-let tongueDCI = null, tongueClone = null, tongueCloneMin = -1, tongueId = -1;
+let tongueDCI = null, tongueClone = null, tongueCloneMin = -1;
 let tongueDrawX = 0, tongueDrawY = 0;   // scaled tongue's draw position (per minute)
 
 // Each petal is offset by its position, so the resting flower is already
@@ -825,18 +823,12 @@ function drawScreen(event) {
             yoshiHeadKey = key;
             yoshiHead = loadDCI(RES[R_YOSHI + key]);
         }
+        if (!tongueDCI) tongueDCI = loadDCI(RES[R_TONGUE]);
         const mouthX = CX + YOSHI_PIVOT_DX, mouthY = CY + YOSHI_PIVOT_DY;
-        if (minutes !== tongueCloneMin) {
+        if (tongueDCI && minutes !== tongueCloneMin) {
             tongueCloneMin = minutes;
             const ang = (minutes / 60) * TWO_PI;       // 0 = up, clockwise
             const sn = Math.sin(ang), cs = Math.cos(ang), dy = YOSHI_PIVOT_DY;
-            // Two tongue lengths: the LONG one points into the top half (lots of
-            // room), the SHORT one into the bottom half (little room — a scaled-
-            // down long tongue went too thin). Swap the resident DCI on a
-            // hemisphere change (cs<0 = pointing down). Only one is loaded.
-            const wantId = (cs < 0) ? RES[R_TONGUE_SHORT] : RES[R_TONGUE];
-            if (wantId !== tongueId) { tongueId = wantId; tongueDCI = loadDCI(wantId); }
-            if (tongueDCI) {
             // Scale the tongue to FIT: t = distance from the mouth to the screen
             // edge in this direction; the ball lands at t - TONGUE_TIP so it
             // stays on screen. A little scale-up is allowed (vector, stays crisp).
@@ -850,7 +842,6 @@ function drawScreen(event) {
             tongueClone = tongueDCI.clone().scale(s, s).rotate(-ang, px, py);
             tongueDrawX = mouthX - px;
             tongueDrawY = mouthY - py;
-            }
         }
         const head = yoshiHead;
         const drawHead = () => {

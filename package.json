@@ -395,12 +395,6 @@
                     "type": "raw"
                 },
                 {
-                    "file": "data/Tongue_Short.pdc",
-                    "name": "YOSHI_TONGUE_SHORT",
-                    "targetPlatforms": null,
-                    "type": "raw"
-                },
-                {
                     "file": "images/icon.png",
                     "menuIcon": true,
                     "name": "icon",
