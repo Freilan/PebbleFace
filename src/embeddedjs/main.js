@@ -71,7 +71,8 @@ const DOT_R_SQ    = 126 * 126;
 // (the tongue's pivot) lands just below center. The tongue rotates about that
 // mouth point to follow the minute. All offsets are in pixels from (CX, CY).
 const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = 0;    // head image-center offset (centered)
-const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 6;    // mouth = tongue pivot (below center)
+const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 46;   // mouth = tongue pivot (~40px below
+                                                 // center, at Yoshi's mouth opening)
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
 
 function petalAnchor(clockDeg) {
