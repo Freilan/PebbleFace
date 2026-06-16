@@ -70,7 +70,7 @@ const DOT_R_SQ    = 126 * 126;
 // The head image is centered slightly above the watch center so Yoshi's mouth
 // (the tongue's pivot) lands just below center. The tongue rotates about that
 // mouth point to follow the minute. All offsets are in pixels from (CX, CY).
-const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = -16;  // head image-center offset
+const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = 0;    // head image-center offset (centered)
 const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 6;    // mouth = tongue pivot (below center)
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
 
@@ -823,11 +823,11 @@ function drawScreen(event) {
         if (tongueDCI && minutes !== tongueCloneMin) {
             tongueCloneMin = minutes;
             const ang = (minutes / 60) * TWO_PI;       // 0 = up, clockwise
-            // Pivot at the tongue art's bottom-center (its root). Math.PI - ang
-            // (same form as the bee) so the BALL end points outward at the
-            // minute; plain -ang put the ball at the mouth (180 deg off).
+            // Pivot at the tongue art's bottom-center (its root); the ball is
+            // the far end (image top). rotate(-ang) is the petal convention —
+            // points the ball clockwise to the minute. (Math.PI-ang was 180 off.)
             tongueClone = tongueDCI.clone()
-                .rotate(Math.PI - ang, tongueDCI.width >> 1, tongueDCI.height);
+                .rotate(-ang, tongueDCI.width >> 1, tongueDCI.height);
         }
         const mouthX = CX + YOSHI_PIVOT_DX, mouthY = CY + YOSHI_PIVOT_DY;
         const head = yoshiHead;
