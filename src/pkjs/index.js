@@ -7,6 +7,10 @@ try {
   var Clay = require('@rebble/clay');
   var clayConfig = require('./config');
   clay = new Clay(clayConfig);   // auto-registers showConfiguration + webviewclosed
+  // Custom clickable image picker for the Yoshi color (type "yoshicolor" in
+  // config.js). Must be registered before the page is built (i.e. now, at app
+  // start, well before the user opens settings).
+  clay.registerComponent(require('./yoshiColorPicker'));
 } catch (e) {}
 
 var moddableProxy = require("@moddable/pebbleproxy");

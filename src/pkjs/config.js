@@ -81,16 +81,10 @@ module.exports = [
         "defaultValue": false
       },
       {
-        "type": "radiogroup",
+        "type": "yoshicolor",
         "messageKey": "YoshiColor",
         "label": "Yoshi Color",
-        "defaultValue": "0",
-        "options": [
-          { "label": "Green",      "value": "0" },
-          { "label": "Light Blue", "value": "1" },
-          { "label": "Red",        "value": "2" },
-          { "label": "Yellow",     "value": "3" }
-        ]
+        "defaultValue": "0"
       }
     ]
   },
