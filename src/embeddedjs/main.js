@@ -74,6 +74,8 @@ const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = 0;    // head image-center offset (ce
 const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 46;   // mouth = tongue pivot (~40px below
                                                  // center, at Yoshi's mouth opening)
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
+const TONGUE_R   = 122;   // keep the tongue's ball within this radius of center
+const TONGUE_TIP = 16;    // px of slack so the ball isn't clipped at the edge
 
 function petalAnchor(clockDeg) {
     const rad = (clockDeg - 90) * Math.PI / 180;
@@ -260,6 +262,7 @@ let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
 // once and re-rotated per minute (mirrors the bee). Memory-neutral vs face+bee.
 let yoshiHead = null, yoshiHeadKey = -1;
 let tongueDCI = null, tongueClone = null, tongueCloneMin = -1;
+let tongueDrawX = 0, tongueDrawY = 0;   // scaled tongue's draw position (per minute)
 
 // Each petal is offset by its position, so the resting flower is already
 // varied (frames 0,1,2,0,… around the wheel) and during the animation
@@ -821,16 +824,27 @@ function drawScreen(event) {
             yoshiHead = loadDCI(RES[R_YOSHI + key]);
         }
         if (!tongueDCI) tongueDCI = loadDCI(RES[R_TONGUE]);
+        const mouthX = CX + YOSHI_PIVOT_DX, mouthY = CY + YOSHI_PIVOT_DY;
         if (tongueDCI && minutes !== tongueCloneMin) {
             tongueCloneMin = minutes;
             const ang = (minutes / 60) * TWO_PI;       // 0 = up, clockwise
-            // Pivot at the tongue art's bottom-center (its root); the ball is
-            // the far end (image top). rotate(-ang) is the petal convention —
-            // points the ball clockwise to the minute. (Math.PI-ang was 180 off.)
-            tongueClone = tongueDCI.clone()
-                .rotate(-ang, tongueDCI.width >> 1, tongueDCI.height);
+            // The mouth sits ~46px below center, so a fixed-length tongue runs
+            // off the bottom edge when it points down. Scale it to FIT: t is the
+            // distance from the mouth to the screen edge in this direction; cap
+            // the tongue length at t - TONGUE_TIP so the ball stays on screen.
+            // Longest pointing up (room to spare), shortest pointing down.
+            const sn = Math.sin(ang), cs = Math.cos(ang), dy = YOSHI_PIVOT_DY;
+            const t = dy * cs + Math.sqrt(TONGUE_R * TONGUE_R - dy * dy * sn * sn);
+            let s = (t - TONGUE_TIP) / tongueDCI.height;
+            if (s > 1) s = 1; else if (s < 0.25) s = 0.25;
+            // Pivot at the tongue art's bottom-center (its root, the ball is the
+            // far end / image top). After scale(s,s) the root is at (w/2·s, h·s);
+            // rotate(-ang) (petal convention) points the ball to the minute.
+            const px = (tongueDCI.width >> 1) * s, py = tongueDCI.height * s;
+            tongueClone = tongueDCI.clone().scale(s, s).rotate(-ang, px, py);
+            tongueDrawX = mouthX - px;
+            tongueDrawY = mouthY - py;
         }
-        const mouthX = CX + YOSHI_PIVOT_DX, mouthY = CY + YOSHI_PIVOT_DY;
         const head = yoshiHead;
         const drawHead = () => {
             if (head) render.drawDCI(head,
@@ -838,8 +852,7 @@ function drawScreen(event) {
                 CY + YOSHI_HEAD_DY - (head.height >> 1));
         };
         const drawTongue = () => {
-            if (tongueClone) render.drawDCI(tongueClone,
-                mouthX - (tongueDCI.width >> 1), mouthY - tongueDCI.height);
+            if (tongueClone) render.drawDCI(tongueClone, tongueDrawX, tongueDrawY);
         };
         if (YOSHI_TONGUE_DRAW_FIRST) { drawTongue(); drawHead(); }
         else                         { drawHead(); drawTongue(); }
