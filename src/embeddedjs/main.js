@@ -71,11 +71,11 @@ const DOT_R_SQ    = 126 * 126;
 // (the tongue's pivot) lands just below center. The tongue rotates about that
 // mouth point to follow the minute. All offsets are in pixels from (CX, CY).
 const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = 0;    // head image-center offset (centered)
-const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 46;   // mouth = tongue pivot (~40px below
+const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 50;   // mouth = tongue pivot (~44px below
                                                  // center, at Yoshi's mouth opening)
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
-const TONGUE_R   = 122;   // keep the tongue's ball within this radius of center
-const TONGUE_TIP = 16;    // px of slack so the ball isn't clipped at the edge
+const TONGUE_R   = 130;   // keep the tongue's ball within this radius of center
+const TONGUE_TIP = 14;    // px of slack so the ball isn't clipped at the edge
 
 function petalAnchor(clockDeg) {
     const rad = (clockDeg - 90) * Math.PI / 180;
@@ -836,7 +836,8 @@ function drawScreen(event) {
             const sn = Math.sin(ang), cs = Math.cos(ang), dy = YOSHI_PIVOT_DY;
             const t = dy * cs + Math.sqrt(TONGUE_R * TONGUE_R - dy * dy * sn * sn);
             let s = (t - TONGUE_TIP) / tongueDCI.height;
-            if (s > 1) s = 1; else if (s < 0.25) s = 0.25;
+            if (s > 1.5) s = 1.5; else if (s < 0.3) s = 0.3;  // allow a bit of
+            // scale-up (vector, stays crisp) so it can reach the top edge too
             // Pivot at the tongue art's bottom-center (its root, the ball is the
             // far end / image top). After scale(s,s) the root is at (w/2·s, h·s);
             // rotate(-ang) (petal convention) points the ball to the minute.
