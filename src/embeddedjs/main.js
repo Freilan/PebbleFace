@@ -168,7 +168,7 @@ for (let i = 0; i < 3; i++) {
     const f = loadDCI(RES[R_PETAL + i]);
     if (f) petalFrames.push(f);
 }
-const beeDCI = loadDCI(RES[R_BEE]);
+const beeDCI = yoshiMode ? null : loadDCI(RES[R_BEE]);  // bee unused in Yoshi mode
 const P_PX   = petalFrames.map(f => f.width >> 1);
 const P_PY   = petalFrames.map(f => f.height);
 const BEE_PX = beeDCI ? beeDCI.width  >> 1 : 0;
@@ -181,6 +181,10 @@ const BEE_PY = beeDCI ? beeDCI.height >> 1 : 0;
 // keeps face_2_1 (the clamp below).
 let faceSet = [], faceSetIdx = -1;
 function loadFaceSet(count) {
+    // Yoshi mode hides the smiley, so don't keep the face set resident — that
+    // heap is what Yoshi's head + tongue need (otherwise the weather fetch
+    // OOMs). Charging draws its own center face, so keep it while charging.
+    if (yoshiMode && !charging) { faceSet = []; faceSetIdx = -1; return; }
     let si = (12 - count) >> 1;
     if (si >= N_SETS) si = N_SETS - 1;
     if (si === faceSetIdx) return;
