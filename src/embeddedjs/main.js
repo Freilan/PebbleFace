@@ -76,6 +76,9 @@ const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 50;   // mouth = tongue pivot (~44px 
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
 const TONGUE_R   = 130;   // keep the tongue's ball within this radius of center
 const TONGUE_TIP = 8;     // px of slack so the ball isn't clipped at the edge
+const TONGUE_W   = 1.0;   // thickness multiplier (x-axis only); 1.0 = native width.
+                          // Length (y) auto-scales to reach the edge; this stays
+                          // fixed so the tongue keeps a constant thickness.
 
 function petalAnchor(clockDeg) {
     const rad = (clockDeg - 90) * Math.PI / 180;
@@ -835,11 +838,14 @@ function drawScreen(event) {
             const t = dy * cs + Math.sqrt(TONGUE_R * TONGUE_R - dy * dy * sn * sn);
             let s = (t - TONGUE_TIP) / tongueDCI.height;
             if (s > 1.5) s = 1.5; else if (s < 0.3) s = 0.3;
-            // Pivot at the tongue art's bottom-center (its root, the ball is the
-            // far end / image top). After scale(s,s) the root is at (w/2·s, h·s);
+            // LENGTH-ONLY scale: scale the y-axis (the tongue's length) to reach
+            // the edge, but keep x (thickness) at a FIXED TONGUE_W so the tongue
+            // doesn't get fat when long or pencil-thin when short. Pivot at the
+            // art's bottom-center (its root; the ball is the far end / image top).
+            // After scale(TONGUE_W,s) the root is at (w/2·TONGUE_W, h·s);
             // rotate(-ang) (petal convention) points the ball to the minute.
-            const px = (tongueDCI.width >> 1) * s, py = tongueDCI.height * s;
-            tongueClone = tongueDCI.clone().scale(s, s).rotate(-ang, px, py);
+            const px = (tongueDCI.width >> 1) * TONGUE_W, py = tongueDCI.height * s;
+            tongueClone = tongueDCI.clone().scale(TONGUE_W, s).rotate(-ang, px, py);
             tongueDrawX = mouthX - px;
             tongueDrawY = mouthY - py;
         }
