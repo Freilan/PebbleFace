@@ -38,7 +38,7 @@ typedef struct {
 //   [21]     bee
 //   [22..27] weather icons: cloudy, pcloudy, clear, rain, snow, storm
 //   [28..59] yoshi heads, color-major: green, lblue, red, yellow (x8 dirs)
-//   [60]     yoshi tongue
+//   [60]     yoshi tongue (long)   [61] yoshi tongue_short
 static const uint8_t s_resource_ids[] = {
   RESOURCE_ID_PETAL_1, RESOURCE_ID_PETAL_2, RESOURCE_ID_PETAL_3,
   RESOURCE_ID_FALL_1, RESOURCE_ID_FALL_2, RESOURCE_ID_FALL_3,
@@ -64,7 +64,7 @@ static const uint8_t s_resource_ids[] = {
   RESOURCE_ID_YOSHI_YELLOW_0, RESOURCE_ID_YOSHI_YELLOW_1, RESOURCE_ID_YOSHI_YELLOW_2,
   RESOURCE_ID_YOSHI_YELLOW_3, RESOURCE_ID_YOSHI_YELLOW_4, RESOURCE_ID_YOSHI_YELLOW_5,
   RESOURCE_ID_YOSHI_YELLOW_6, RESOURCE_ID_YOSHI_YELLOW_7,
-  RESOURCE_ID_YOSHI_TONGUE,
+  RESOURCE_ID_YOSHI_TONGUE, RESOURCE_ID_YOSHI_TONGUE_SHORT,
 };
 
 // ── Minimal FFI ABI ───────────────────────────────────────────

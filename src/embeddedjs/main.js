@@ -75,7 +75,7 @@ const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 50;   // mouth = tongue pivot (~44px 
                                                  // center, at Yoshi's mouth opening)
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
 const TONGUE_R   = 130;   // keep the tongue's ball within this radius of center
-const TONGUE_TIP = 14;    // px of slack so the ball isn't clipped at the edge
+const TONGUE_TIP = 8;     // px of slack so the ball isn't clipped at the edge
 
 function petalAnchor(clockDeg) {
     const rad = (clockDeg - 90) * Math.PI / 180;
@@ -104,8 +104,9 @@ const R_BEE   = 21;
 const R_WX    = 22;    // cloudy, pcloudy, clear, rain, snow, storm
 const R_YOSHI = 28;    // Yoshi heads, color-major: 4 colors x 8 directions
                        //   id = R_YOSHI + color*8 + dir  (color 0..3, dir 0..7)
-const R_TONGUE = 60;   // single shared tongue (rotated to the minute)
-const R_LEN   = 61;    // table entries; media count is R_LEN + 1 (icon.png)
+const R_TONGUE = 60;   // long tongue (used pointing into the top half)
+const R_TONGUE_SHORT = 61;  // short tongue (used pointing into the bottom half)
+const R_LEN   = 62;    // table entries; media count is R_LEN + 1 (icon.png)
 const FACE_FRAMES = 2; // frames per face set
 const N_SETS  = 6;
 const YOSHI_DIRS = 8;  // directional head images per color
@@ -145,6 +146,7 @@ if (!RES || RES.length < R_LEN) {
     RES[R_BEE] = id++;                                     // bee            28
     for (let i = 0; i < 32; i++) RES[R_YOSHI + i] = id++;  // yoshi heads    29-60
     RES[R_TONGUE] = id++;                                  // tongue         61
+    RES[R_TONGUE_SHORT] = id++;                            // tongue_short   62
     // Anchor check: if the resource ball is ever NOT media order, these sizes
     // won't match — the face would draw wrong art, and this line says why.
     // (Only 3 decodes, so no scan-style OOM.)
@@ -261,7 +263,7 @@ let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
 // Yoshi-mode caches: head reloaded only when color*8+dir changes; tongue loaded
 // once and re-rotated per minute (mirrors the bee). Memory-neutral vs face+bee.
 let yoshiHead = null, yoshiHeadKey = -1;
-let tongueDCI = null, tongueClone = null, tongueCloneMin = -1;
+let tongueDCI = null, tongueClone = null, tongueCloneMin = -1, tongueId = -1;
 let tongueDrawX = 0, tongueDrawY = 0;   // scaled tongue's draw position (per minute)
 
 // Each petal is offset by its position, so the resting flower is already
@@ -823,21 +825,24 @@ function drawScreen(event) {
             yoshiHeadKey = key;
             yoshiHead = loadDCI(RES[R_YOSHI + key]);
         }
-        if (!tongueDCI) tongueDCI = loadDCI(RES[R_TONGUE]);
         const mouthX = CX + YOSHI_PIVOT_DX, mouthY = CY + YOSHI_PIVOT_DY;
-        if (tongueDCI && minutes !== tongueCloneMin) {
+        if (minutes !== tongueCloneMin) {
             tongueCloneMin = minutes;
             const ang = (minutes / 60) * TWO_PI;       // 0 = up, clockwise
-            // The mouth sits ~46px below center, so a fixed-length tongue runs
-            // off the bottom edge when it points down. Scale it to FIT: t is the
-            // distance from the mouth to the screen edge in this direction; cap
-            // the tongue length at t - TONGUE_TIP so the ball stays on screen.
-            // Longest pointing up (room to spare), shortest pointing down.
             const sn = Math.sin(ang), cs = Math.cos(ang), dy = YOSHI_PIVOT_DY;
+            // Two tongue lengths: the LONG one points into the top half (lots of
+            // room), the SHORT one into the bottom half (little room — a scaled-
+            // down long tongue went too thin). Swap the resident DCI on a
+            // hemisphere change (cs<0 = pointing down). Only one is loaded.
+            const wantId = (cs < 0) ? RES[R_TONGUE_SHORT] : RES[R_TONGUE];
+            if (wantId !== tongueId) { tongueId = wantId; tongueDCI = loadDCI(wantId); }
+            if (tongueDCI) {
+            // Scale the tongue to FIT: t = distance from the mouth to the screen
+            // edge in this direction; the ball lands at t - TONGUE_TIP so it
+            // stays on screen. A little scale-up is allowed (vector, stays crisp).
             const t = dy * cs + Math.sqrt(TONGUE_R * TONGUE_R - dy * dy * sn * sn);
             let s = (t - TONGUE_TIP) / tongueDCI.height;
-            if (s > 1.5) s = 1.5; else if (s < 0.3) s = 0.3;  // allow a bit of
-            // scale-up (vector, stays crisp) so it can reach the top edge too
+            if (s > 1.5) s = 1.5; else if (s < 0.3) s = 0.3;
             // Pivot at the tongue art's bottom-center (its root, the ball is the
             // far end / image top). After scale(s,s) the root is at (w/2·s, h·s);
             // rotate(-ang) (petal convention) points the ball to the minute.
@@ -845,6 +850,7 @@ function drawScreen(event) {
             tongueClone = tongueDCI.clone().scale(s, s).rotate(-ang, px, py);
             tongueDrawX = mouthX - px;
             tongueDrawY = mouthY - py;
+            }
         }
         const head = yoshiHead;
         const drawHead = () => {
@@ -876,17 +882,20 @@ function drawScreen(event) {
     }
 
     let w, a;
+    // In Yoshi mode, nudge the date 10px left and the weather 10px right so they
+    // clear Yoshi's wider head a little.
+    const txtDX = yoshiMode ? 10 : 0;
 
     if (showDate) {
         a = petalAnchor(300);
         const dayStr = DAYS[now.getDay()];
         w = render.getTextWidth(dayStr, font);
-        strokeText(dayStr, a.x - (w >> 1), a.y - (font.height >> 1));
+        strokeText(dayStr, a.x - (w >> 1) - txtDX, a.y - (font.height >> 1));
 
         a = petalAnchor(270);
         const dateStr = MONTHS[now.getMonth()] + " " + String(now.getDate()).padStart(2, "0");
         w = render.getTextWidth(dateStr, font);
-        strokeText(dateStr, a.x - (w >> 1) - 5, a.y - (font.height >> 1));
+        strokeText(dateStr, a.x - (w >> 1) - 5 - txtDX, a.y - (font.height >> 1));
     }
 
     if (showWeather) {
@@ -896,7 +905,7 @@ function drawScreen(event) {
         const numStr = weather ? String(weather.temp) : "--";
         const DEG_GAP = 2, DEG_W = 9;
         w = render.getTextWidth(numStr, font);
-        const tx = a.x - ((w + DEG_GAP + DEG_W) >> 1) + 5;
+        const tx = a.x - ((w + DEG_GAP + DEG_W) >> 1) + 5 + txtDX;
         const ty = a.y - (font.height >> 1);
         strokeText(numStr, tx, ty);
         drawDegree(tx + w + DEG_GAP, ty + 1);   // ty+1 nudges it to the digits' top
@@ -909,7 +918,7 @@ function drawScreen(event) {
             if (wx !== undefined) {
                 const icon = loadDCI(RES[R_WX + wx]);
                 if (icon) render.drawDCI(icon,
-                    a.x - (icon.width  >> 1),
+                    a.x - (icon.width  >> 1) + txtDX,
                     a.y - (icon.height >> 1));
             }
         }
