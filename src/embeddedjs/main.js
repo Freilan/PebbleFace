@@ -71,11 +71,11 @@ const DOT_R_SQ    = 126 * 126;
 // (the tongue's pivot) lands just below center. The tongue rotates about that
 // mouth point to follow the minute. All offsets are in pixels from (CX, CY).
 const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = 0;    // head image-center offset (centered)
-const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 50;   // mouth = tongue pivot (~44px below
+const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 52;   // mouth = tongue pivot (~46px below
                                                  // center, at Yoshi's mouth opening)
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
 const TONGUE_R   = 130;   // keep the tongue's ball within this radius of center
-const TONGUE_TIP = 8;     // px of slack so the ball isn't clipped at the edge
+const TONGUE_TIP = 4;     // px of slack so the ball isn't clipped at the edge
 const TONGUE_W   = 1.0;   // thickness multiplier (x-axis only); 1.0 = native width.
                           // Length (y) auto-scales to reach the edge; this stays
                           // fixed so the tongue keeps a constant thickness.
