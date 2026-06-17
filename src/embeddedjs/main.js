@@ -74,10 +74,11 @@ const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = 0;    // head image-center offset (ce
 const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 52;   // mouth = tongue pivot (~46px below
                                                  // center, at Yoshi's mouth opening)
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
-const TONGUE_R   = 130;   // keep the tongue's ball within this radius of center
-const TONGUE_TIP = 4;     // px of slack so the ball isn't clipped at the edge
+const TONGUE_R   = 126;   // the ball (the minute POINTER) orbits the watch CENTER
+const TONGUE_TIP = 6;     //   at radius (TONGUE_R - TONGUE_TIP) = 120, like a real
+                          //   minute hand, staying just inside the screen edge.
 const TONGUE_W   = 1.0;   // thickness multiplier (x-axis only); 1.0 = native width.
-                          // Length (y) auto-scales to reach the edge; this stays
+                          // Length (y) auto-scales to reach the ball; this stays
                           // fixed so the tongue keeps a constant thickness.
 
 function petalAnchor(clockDeg) {
@@ -831,21 +832,26 @@ function drawScreen(event) {
         if (tongueDCI && minutes !== tongueCloneMin) {
             tongueCloneMin = minutes;
             const ang = (minutes / 60) * TWO_PI;       // 0 = up, clockwise
-            const sn = Math.sin(ang), cs = Math.cos(ang), dy = YOSHI_PIVOT_DY;
-            // Scale the tongue to FIT: t = distance from the mouth to the screen
-            // edge in this direction; the ball lands at t - TONGUE_TIP so it
-            // stays on screen. A little scale-up is allowed (vector, stays crisp).
-            const t = dy * cs + Math.sqrt(TONGUE_R * TONGUE_R - dy * dy * sn * sn);
-            let s = (t - TONGUE_TIP) / tongueDCI.height;
+            // The ball is the minute POINTER, so it must land on the ray from the
+            // watch CENTER at the clock angle -- exactly where a centered minute
+            // hand points. The tongue pivots at the MOUTH (YOSHI_PIVOT_DY below
+            // center), so rotating it by `ang` about the mouth would aim the ball
+            // off to the side (worst on the top half). Instead: target the ball at
+            // RT from center, then solve the tongue's own length + rotation about
+            // the mouth so its tip reaches that target.
+            const RT = TONGUE_R - TONGUE_TIP;          // ball's distance from CENTER
+            const vx = RT * Math.sin(ang);             // mouth -> ball, x
+            const vy = -RT * Math.cos(ang) - YOSHI_PIVOT_DY;  // mouth -> ball, y
+            const L = Math.sqrt(vx * vx + vy * vy);    // tongue length to reach it
+            const phi = Math.atan2(vx, -vy);           // tongue's own clock-angle
+            let s = L / tongueDCI.height;
             if (s > 1.5) s = 1.5; else if (s < 0.3) s = 0.3;
-            // LENGTH-ONLY scale: scale the y-axis (the tongue's length) to reach
-            // the edge, but keep x (thickness) at a FIXED TONGUE_W so the tongue
-            // doesn't get fat when long or pencil-thin when short. Pivot at the
-            // art's bottom-center (its root; the ball is the far end / image top).
-            // After scale(TONGUE_W,s) the root is at (w/2·TONGUE_W, h·s);
-            // rotate(-ang) (petal convention) points the ball to the minute.
+            // LENGTH-ONLY scale (y = length, x = fixed TONGUE_W thickness). Pivot
+            // at the art's bottom-center root (ball = far end / image top); after
+            // scale(TONGUE_W,s) the root is at (w/2·TONGUE_W, h·s). rotate(-phi)
+            // (petal convention) points the ball along the CENTER ray.
             const px = (tongueDCI.width >> 1) * TONGUE_W, py = tongueDCI.height * s;
-            tongueClone = tongueDCI.clone().scale(TONGUE_W, s).rotate(-ang, px, py);
+            tongueClone = tongueDCI.clone().scale(TONGUE_W, s).rotate(-phi, px, py);
             tongueDrawX = mouthX - px;
             tongueDrawY = mouthY - py;
         }
