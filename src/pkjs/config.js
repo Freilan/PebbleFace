@@ -14,7 +14,7 @@ module.exports = [
   },
   {
     "type": "text",
-    "defaultValue": "Make the face your own."
+    "defaultValue": "Customize &amp; Add or Remove Complications."
   },
   {
     "type": "section",
@@ -69,10 +69,10 @@ module.exports = [
   {
     "type": "section",
     "items": [
-      { "type": "heading", "defaultValue": "Yoshi" },
+      { "type": "heading", "defaultValue": "Yoshi Mode" },
       {
         "type": "text",
-        "defaultValue": "Replace the center face and bee with Yoshi: his tongue points at the minutes and he turns to face them."
+        "defaultValue": "Adds Yoshi as the Flower Face! His tongue points at the minutes."
       },
       {
         "type": "toggle",
