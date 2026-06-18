@@ -74,8 +74,8 @@ const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = 0;    // head image-center offset (ce
 const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 52;   // mouth = tongue pivot (~46px below
                                                  // center, at Yoshi's mouth opening)
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
-const TONGUE_R   = 126;   // the ball (the minute POINTER) orbits the watch CENTER
-const TONGUE_TIP = 6;     //   at radius (TONGUE_R - TONGUE_TIP) = 120, like a real
+const TONGUE_R   = 131;   // the ball (the minute POINTER) orbits the watch CENTER
+const TONGUE_TIP = 6;     //   at radius (TONGUE_R - TONGUE_TIP) = 125, like a real
                           //   minute hand, staying just inside the screen edge.
 const TONGUE_W   = 1.0;   // thickness multiplier (x-axis only); 1.0 = native width.
                           // Length (y) auto-scales to reach the ball; this stays
