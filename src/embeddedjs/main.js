@@ -127,52 +127,6 @@ function loadDCI(id) {
     catch(e) { return null; }
 }
 
-// ── TEMP one-time API probe (runtime recolor investigation) ───────
-// Native (host) objects keep their data internal, so the useful method names
-// live on the PROTOTYPE chain, not the instance. Walk a few proto levels of a
-// loaded Yoshi head + its clone, and poke at the likely color / command-list
-// accessors, to learn whether this build exposes per-command color mutation
-// (which would let one base head set be recolored in code → drop 24 resources).
-// Read-only; runs ONCE; strip once we have the answer.
-let probedColorAPI = false;
-function probeColorAPI() {
-    function dump(label, o) {
-        if (o === null || o === undefined) {
-            trace("[PROBE] ", label, " = ", String(o), "\n"); return;
-        }
-        let cur = o, depth = 0;
-        while (cur && depth < 4) {
-            let names;
-            try { names = Object.getOwnPropertyNames(cur).join(","); }
-            catch(e) { names = "ERR:" + e.message; }
-            trace("[PROBE] ", label, "[p", depth, "] ", names, "\n");
-            try { cur = Object.getPrototypeOf(cur); } catch(e) { cur = null; }
-            depth++;
-        }
-    }
-    try {
-        const id = (RES && RES.length > R_YOSHI) ? RES[R_YOSHI] : 0;
-        const dci = loadDCI(id);
-        trace("[PROBE] head id=", id, " loaded=", !!dci, "\n");
-        dump("dci", dci);
-        if (dci) {
-            const c = dci.clone();
-            dump("clone", c);
-            const cmdKeys = ["commands", "commandList", "getCommandList",
-                "getCommands", "list", "length", "numCommands", "commandCount"];
-            for (let i = 0; i < cmdKeys.length; i++)
-                trace("[PROBE] dci.", cmdKeys[i], "=", typeof dci[cmdKeys[i]], "\n");
-            const colKeys = ["setFillColor", "setStrokeColor", "setColor",
-                "replaceColor", "recolor", "tint", "fill", "stroke", "color"];
-            for (let i = 0; i < colKeys.length; i++)
-                trace("[PROBE] clone.", colKeys[i], "=", typeof c[colKeys[i]], "\n");
-        }
-        dump("Poco", Poco);
-    } catch(e) {
-        trace("[PROBE] error: ", e.message, "\n");
-    }
-}
-
 let RES = null;
 try { RES = new Uint8Array(Natives.ids); } catch(e) {}
 trace("[RES] natives=", RES ? RES.length : -1, " need=", R_LEN, "\n");  // TEMP diag
@@ -702,7 +656,6 @@ function drawDegree(x, y) {
 function drawScreen(event) {
     const now = (event && event.date) ? event.date : lastDate;
     if (event && event.date) lastDate = event.date;
-    if (!probedColorAPI) { probedColorAPI = true; probeColorAPI(); }  // TEMP
   try {
     // Layer 1: background + dots, one horizontal band per dot row so the
     // display list stays small (~90 rects per band vs ~700 for the whole
