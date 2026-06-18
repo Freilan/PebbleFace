@@ -129,10 +129,9 @@ function loadDCI(id) {
 
 let RES = null;
 try { RES = new Uint8Array(Natives.ids); } catch(e) {}
-trace("[RES] natives=", RES ? RES.length : -1, " need=", R_LEN, "\n");  // TEMP diag
 if (!RES || RES.length < R_LEN) {
-    // No FFI table on this firmware (Natives absent — confirmed by the [RES]
-    // trace). The build's resource ball is EXACT media order in this toolchain
+    // No FFI table on this firmware (Natives absent — confirmed on-device).
+    // The build's resource ball is EXACT media order in this toolchain
     // (verified against the build's resource_ball line), so map each table slot
     // straight to its media-order id. This replaces the old viewbox-fingerprint
     // scan, which loaded EVERY resource in one job — fine at ~28, but it OOM'd
@@ -149,20 +148,6 @@ if (!RES || RES.length < R_LEN) {
     RES[R_BEE] = id++;                                     // bee            28
     for (let i = 0; i < 32; i++) RES[R_YOSHI + i] = id++;  // yoshi heads    29-60
     RES[R_TONGUE] = id++;                                  // tongue         61
-    // Anchor check: if the resource ball is ever NOT media order, these sizes
-    // won't match — the face would draw wrong art, and this line says why.
-    // (Only 3 decodes, so no scan-style OOM.)
-    const chk = [[R_PETAL, 60, 130], [R_BEE, 50, 50], [R_FACE, 104, 106]];
-    for (let i = 0; i < chk.length; i++) {
-        const d = loadDCI(RES[chk[i][0]]);
-        if (!d || d.width !== chk[i][1] || d.height !== chk[i][2]) {
-            trace("[RES] media-order anchor FAILED slot=", chk[i][0],
-                  " got=", d ? (d.width + "x" + d.height) : "null", "\n");
-            break;
-        }
-    }
-    // Free the anchor decodes from a fresh job (WeakRef-pinned until job end).
-    Timer.set(() => { try { for (let i = 0; i < 3; i++) new ArrayBuffer(2048); } catch(e) {} });
 }
 
 // Resident images: the 3 petal idle frames, the bee, and the current face

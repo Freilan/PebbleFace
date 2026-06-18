@@ -114,9 +114,6 @@ typedef struct {
 // (which consumes both). The value slot is created in place ON the XS
 // stack so the allocation is GC-rooted from the moment it exists.
 static void prv_build_ffi(FfiMachine *the, FfiApi *api) {
-  // If this line never shows in the app log, the firmware predates the
-  // fxBuildFFI hook and the JS falls back to viewbox fingerprints.
-  APP_LOG(APP_LOG_LEVEL_INFO, "[FFI] hook running");
   FfiSlot *self = api->this_(the);
   api->push(the, self);                       // target object
   api->push(the, self);                       // placeholder -> value
