@@ -44,7 +44,20 @@ TAGS = {
     "icon_rain.pdc":    (40, 41),    # natural 40x40 — clear owns it
     "icon_snow.pdc":    (41, 40),    # natural 40x40
     "icon_storm.pdc":   (42, 40),    # natural
+    "Tongue.pdc":       (25, 152),   # natural — width 25 is unique on its own
 }
+
+# Yoshi heads: 32 files, all naturally 145x145, so they MUST be tagged apart.
+# Encode the identity in the viewbox so the runtime can decode it directly:
+#   width  = 145 + color   (green 0, lblue 1, red 2, yellow 3)  -> 145..148
+#   height = 145 + dir      (U 0, UR 1, R 2, DR 3, D 4, DL 5, L 6, UL 7) -> 145..152
+# Only ever INCREASE from 145 (never clip the art); the watchface centers heads
+# on a fixed 145 base, so the few extra transparent px don't shift anything.
+_YOSHI_PREFIX = {0: "Green", 1: "", 2: "Red", 3: "Yellow"}
+_YOSHI_DIRS   = ["U", "UR", "R", "DR", "D", "DL", "L", "UL"]
+for _c in range(4):
+    for _d in range(8):
+        TAGS[f"{_YOSHI_PREFIX[_c]}YoshiHead-{_YOSHI_DIRS[_d]}.pdc"] = (145 + _c, 145 + _d)
 
 def tag(path, w, h):
     data = bytearray(open(path, "rb").read())

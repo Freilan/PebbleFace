@@ -157,60 +157,87 @@ function drawDot(px, py) {
     render.fillRectangle(C_DOT, px-2, py+4, 4, 1);
 }
 
-// Resource ids are the position of each resource in the build's RESOURCE BALL
-// (1-based). This firmware has no FFI (Natives absent) and no by-name lookup, so
-// the JS side must know that order. It is NOT media order and NOT stable across
-// CloudPebble re-imports: a fresh import reshuffled it (the build log's
-// `resource_ball` line is the only authority). This table is therefore PINNED to
-// the current project's order, captured from that line and mapped to the R_*
-// slots below (index = R_PETAL..R_TONGUE). If the order ever shifts again (another
-// re-import, or editing resources in CloudPebble), the anchor check below traces
-// `[RES] anchor FAILED` and this array must be recaptured from the new build log.
-//   layout: [R_PETAL ×3][R_FALL ×3][R_GROW ×3][R_FACE ×12][R_BEE][R_WX ×6]
-//           [R_YOSHI ×32 (green,lblue,red,yellow each ×8 dirs)][R_TONGUE]
-const RES = [
-    55, 56, 57, 58, 2, 19, 59, 60,
-    61, 39, 40, 37, 38, 47, 48, 45,
-    46, 43, 44, 41, 42, 36, 50, 51,
-    49, 52, 53, 54, 7, 9, 6, 4,
-    1, 3, 5, 8, 33, 35, 32, 30,
-    28, 29, 31, 34, 15, 17, 14, 12,
-    10, 11, 13, 16, 25, 27, 24, 22,
-    20, 21, 23, 26, 18
-];
+// ── Resource ids by VIEWBOX FINGERPRINT ───────────────────────
+// This firmware has no FFI (Natives absent) and no by-name lookup, and the
+// build assigns resource ids in an order that is NOT stable across builds
+// (CloudPebble reshuffles it on every build). So we can't hardcode ids. Instead
+// every PDC carries a UNIQUE viewbox (w,h) stamped by tools/tag_pdcs.py, and we
+// identify each resource at runtime by its size. FP maps (w<<8|h) -> R_* slot —
+// KEEP IT IN SYNC WITH tag_pdcs.py.
+const FP = {};
+for (let i = 0; i < 3; i++) FP[((60 + i) << 8) | 130] = R_PETAL + i;   // petals 60,61,62 x130
+for (let i = 0; i < 3; i++) FP[((63 + i) << 8) | 130] = R_FALL  + i;   // falls  63,64,65 x130
+for (let i = 0; i < 3; i++) FP[((50 + i) << 8) | 130] = R_GROW  + i;   // grows  50,51,52 x130
+for (let s = 0; s < 6; s++)                                            // faces (104+set)x(106+frame)
+    for (let f = 0; f < 2; f++) FP[((104 + s) << 8) | (106 + f)] = R_FACE + s * 2 + f;
+FP[(50 << 8) | 50] = R_BEE;
+FP[(40 << 8) | 30] = R_WX + 0;   // cloudy
+FP[(45 << 8) | 40] = R_WX + 1;   // pcloudy
+FP[(40 << 8) | 40] = R_WX + 2;   // clear
+FP[(40 << 8) | 41] = R_WX + 3;   // rain
+FP[(41 << 8) | 40] = R_WX + 4;   // snow
+FP[(42 << 8) | 40] = R_WX + 5;   // storm
+for (let c = 0; c < 4; c++)                                           // yoshi heads:
+    for (let d = 0; d < 8; d++) FP[((145 + c) << 8) | (145 + d)] = R_YOSHI + c * 8 + d;  // w=145+color, h=145+dir
+FP[(25 << 8) | 152] = R_TONGUE;
 
-// RES-order guard (BOTH platforms). The RES table above is pinned to one build's
-// resource-ball order; if a rebuild/re-import reshuffles it, the art scrambles.
-// Probe three known native sizes (petal 60x130, bee 50x50, face 104x106) — if any
-// doesn't match, the order changed and this traces exactly which slot is wrong so
-// the table can be recaptured from the new build log.
-{
-    const chk = [[R_PETAL, 60, 130], [R_BEE, 50, 50], [R_FACE, 104, 106]];
-    for (let i = 0; i < chk.length; i++) {
-        const d = loadDCI(RES[chk[i][0]]);
-        if (!d || d.width !== chk[i][1] || d.height !== chk[i][2]) {
-            trace("[RES] anchor FAILED slot=", chk[i][0],
-                  " got=", d ? (d.width + "x" + d.height) : "null", "\n");
-            break;
-        }
-    }
-}
-
-// Resident images: the 3 petal idle frames, the bee, and the current face
-// set (2 frames, reloaded as the petal count crosses sets). Fall/grow
-// frames are loaded one at a time only while a transition plays — keeping
-// a whole sequence resident alongside a repaint's clones has blown the
-// heap before.
+let RES = null, resReady = false;
+// Resident images, populated by initResident() once the ids are known.
 const petalFrames = [];
-for (let i = 0; i < 3; i++) {
-    const f = loadDCI(RES[R_PETAL + i]);
-    if (f) petalFrames.push(f);
+let beeDCI = null, P_PX = [], P_PY = [], BEE_PX = 0, BEE_PY = 0;
+
+function initResident() {
+    for (let i = 0; i < 3; i++) { const f = loadDCI(RES[R_PETAL + i]); if (f) petalFrames.push(f); }
+    beeDCI = yoshiMode ? null : loadDCI(RES[R_BEE]);   // bee unused in Yoshi mode
+    P_PX   = petalFrames.map(f => (f.width  * S) >> 1);  // scaled bottom-center anchors
+    P_PY   = petalFrames.map(f => (f.height * S) | 0);
+    BEE_PX = beeDCI ? (beeDCI.width  * S) >> 1 : 0;
+    BEE_PY = beeDCI ? (beeDCI.height * S) >> 1 : 0;
+    resReady = true;
 }
-const beeDCI = yoshiMode ? null : loadDCI(RES[R_BEE]);  // bee unused in Yoshi mode
-const P_PX   = petalFrames.map(f => (f.width  * S) >> 1);  // scaled bottom-center
-const P_PY   = petalFrames.map(f => (f.height * S) | 0);   //   anchors (== native on gabbro)
-const BEE_PX = beeDCI ? (beeDCI.width  * S) >> 1 : 0;
-const BEE_PY = beeDCI ? (beeDCI.height * S) >> 1 : 0;
+
+// A cached map is trusted only if these known anchor sizes still match; a new
+// build (reshuffled ids) fails the check and forces a rescan.
+function resOK(r) {
+    if (!r || r.length < R_LEN) return false;
+    const p = loadDCI(r[R_PETAL]), b = loadDCI(r[R_BEE]), f = loadDCI(r[R_FACE]);
+    return !!(p && p.width === 60  && p.height === 130 &&
+              b && b.width === 50  && b.height === 50  &&
+              f && f.width === 104 && f.height === 106);
+}
+
+try {
+    const c = JSON.parse(localStorage.getItem("resmap2"));
+    if (resOK(c)) { RES = c; initResident(); }
+} catch(e) {}
+
+if (!resReady) {
+    // Cold/stale cache: find each resource by fingerprint. Decoding all ~61 at
+    // once OOMs, so SPREAD the scan across timer jobs (a few per job, collected
+    // between jobs). drawScreen paints just the dotted background meanwhile,
+    // since petalFrames/faceSet/beeDCI are still empty.
+    RES = new Array(R_LEN).fill(0);
+    let scanId = 1;
+    const SCAN_MAX = 63, SCAN_PER = 4;     // 62 media + MOD; bitmaps/MOD load as null
+    const scanStep = () => {
+        for (let n = 0; n < SCAN_PER && scanId <= SCAN_MAX; n++, scanId++) {
+            const dci = loadDCI(scanId);
+            if (!dci) continue;
+            const idx = FP[(dci.width << 8) | dci.height];
+            if (idx !== undefined) RES[idx] = scanId;
+        }
+        if (scanId > SCAN_MAX) {
+            try { localStorage.setItem("resmap2", JSON.stringify(RES)); } catch(e) {}
+            initResident();
+            loadFaceSet(petalCount());      // build the face set now ids are known
+            try { drawScreen(); } catch(e) {}
+        } else {
+            try { new ArrayBuffer(2048); } catch(e) {}   // press GC to free this job's decodes
+            Timer.set(scanStep);                          // continue in a fresh job
+        }
+    };
+    Timer.set(scanStep);
+}
 
 // Face sets are named for the PETALS REMAINING they cover: face_12_11 shows
 // while 12 or 11 petals are up ... face_2_1 while 2 or 1 are. Media order
@@ -219,6 +246,7 @@ const BEE_PY = beeDCI ? (beeDCI.height * S) >> 1 : 0;
 // keeps face_2_1 (the clamp below).
 let faceSet = [], faceSetIdx = -1;
 function loadFaceSet(count) {
+    if (!resReady) return;                // ids not resolved yet (fingerprint scan)
     // Yoshi mode hides the smiley, so don't keep the face set resident — that
     // heap is what Yoshi's head + tongue need (otherwise the weather fetch
     // OOMs). Charging draws its own center face, so keep it while charging.
@@ -919,9 +947,11 @@ function drawScreen(event) {
         }
         const head = yoshiHead;
         const drawHead = () => {
+            // Heads are 145x145 art; their viewbox is padded a few px to encode
+            // (color,dir) for the fingerprint, so center on the true 145 base.
             if (head && yoshiHeadDraw) render.drawDCI(yoshiHeadDraw,
-                CX + YOSHI_HEAD_DX - ((head.width  * S) >> 1),
-                CY + YOSHI_HEAD_DY - ((head.height * S) >> 1));
+                CX + YOSHI_HEAD_DX - ((145 * S) >> 1),
+                CY + YOSHI_HEAD_DY - ((145 * S) >> 1));
         };
         const drawTongue = () => {
             if (tongueClone) render.drawDCI(tongueClone, tongueDrawX, tongueDrawY);
