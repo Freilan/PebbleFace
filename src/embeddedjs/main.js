@@ -220,11 +220,13 @@ const BEE_PY = beeDCI ? (beeDCI.height * S) >> 1 : 0;
 // reverse. There is no bare-flower set, so the midnight hour (0 petals)
 // keeps face_2_1 (the clamp below).
 let faceSet = [], faceSetIdx = -1;
+let faceSetDraw = [];   // faceSet scaled for this platform (built once per set load,
+                        //   not per frame — on gabbro these are the originals)
 function loadFaceSet(count) {
     // Yoshi mode hides the smiley, so don't keep the face set resident — that
     // heap is what Yoshi's head + tongue need (otherwise the weather fetch
     // OOMs). Charging draws its own center face, so keep it while charging.
-    if (yoshiMode && !charging) { faceSet = []; faceSetIdx = -1; return; }
+    if (yoshiMode && !charging) { faceSet = []; faceSetDraw = []; faceSetIdx = -1; return; }
     let si = (12 - count) >> 1;
     if (si >= N_SETS) si = N_SETS - 1;
     if (si === faceSetIdx) return;
@@ -243,6 +245,9 @@ function loadFaceSet(count) {
         }
         faceSet.push(img);
     }
+    // Scale the set ONCE here (on gabbro sdraw returns the originals, so this is
+    // the same objects); the per-frame draw then never clones the face.
+    faceSetDraw = faceSet.map(sdraw);
 }
 
 // ── Lookup tables ─────────────────────────────────────────────
@@ -295,6 +300,10 @@ const FACE_TICKS = 4;      // face frame advances ~1x/sec
 let tickCount = 0, animLeft = 0, animTimer = null;
 let accel = null;          // keep the instance alive — GC would unsubscribe tap
 let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
+let beeDrawX = 0, beeDrawY = 0;          // bee draw pos (so emery can draw it last)
+// Weather icon cached: (re)loaded + scaled only when the condition changes, not
+// every frame. A per-frame loadDCI + scale was a big chunk of emery's heap churn.
+let wxIcon = null, wxIconDesc = -1, wxIconW = 0, wxIconH = 0;
 // Yoshi-mode caches: head reloaded only when color*8+dir changes; tongue loaded
 // once and re-rotated per minute (mirrors the bee). Memory-neutral vs face+bee.
 let yoshiHead = null, yoshiHeadKey = -1;
@@ -818,7 +827,7 @@ function drawScreen(event) {
         const cface = faceSet.length ? faceSet[fIdx] : null;
         if (cface) {
             render.begin();
-            render.drawDCI(sdraw(cface), CX - ((cface.width * S) >> 1), CY - ((cface.height * S) >> 1));
+            render.drawDCI(faceSetDraw[fIdx], CX - ((cface.width * S) >> 1), CY - ((cface.height * S) >> 1));
             render.end();
         }
         return;
@@ -916,21 +925,25 @@ function drawScreen(event) {
         // Bee minute-hand + center smiley face (the default). Bee's angle only
         // changes on the minute, so its rotated clone is cached.
         const beeAngle = (minutes / 60) * TWO_PI;
-        const beeX     = Math.round(CX + BEE_R * Math.sin(beeAngle));
-        const beeY     = Math.round(CY - BEE_R * Math.cos(beeAngle));
+        beeDrawX = Math.round(CX + BEE_R * Math.sin(beeAngle)) - BEE_PX;
+        beeDrawY = Math.round(CY - BEE_R * Math.cos(beeAngle)) - BEE_PY;
         if (beeDCI && minutes !== beeCloneMin) {
             beeCloneMin = minutes;
             beeClone = scl(beeDCI.clone()).rotate(Math.PI - beeAngle, BEE_PX, BEE_PY);
         }
         // Face: current set's frame, advancing ~1x/sec during the anim window.
-        const face = faceSet.length
-            ? faceSet[(animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0]
-            : null;
-        if (face) render.drawDCI(sdraw(face), CX - ((face.width * S) >> 1), CY - ((face.height * S) >> 1));
-        if (beeClone) render.drawDCI(beeClone, beeX - BEE_PX, beeY - BEE_PY);
+        const fi2 = (animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0;
+        const face = faceSet.length ? faceSet[fi2] : null;
+        if (face) render.drawDCI(faceSetDraw[fi2], CX - ((face.width * S) >> 1), CY - ((face.height * S) >> 1));
+        // Round watch: bee draws here, beneath the petal-anchored complications
+        // (unchanged). Rect (emery): the bee is deferred and drawn LAST so it
+        // stays ON TOP of the corner complications -- the time must stay readable.
+        if (ROUND && beeClone) render.drawDCI(beeClone, beeDrawX, beeDrawY);
     }
 
     let w, a;
+    if (ROUND) {
+    // Round watch (gabbro): complications sit on the flower's petals.
     // In Yoshi mode, nudge the date 10px left and the weather 10px right so they
     // clear Yoshi's wider head a little.
     const txtDX = yoshiMode ? Math.round(10 * S) : 0;
@@ -971,6 +984,36 @@ function drawScreen(event) {
                     a.y - ((icon.height * S) >> 1));
             }
         }
+    }
+    } else {
+        // Rect watch (emery): complications in the four corners so the flower
+        // stays clean.  TL temperature, TR weather icon, BL day, BR date.
+        const PAD = 5;
+        const yTop = PAD, yBot = H - PAD - font.height;
+        if (showWeather) {
+            const numStr = weather ? String(weather.temp) : "--";
+            strokeText(numStr, PAD, yTop);                                // TL: temp
+            drawDegree(PAD + render.getTextWidth(numStr, font) + 2, yTop + 1);
+            // Condition icon (TR, right-aligned), cached: reload + scale only on a
+            // condition change, NOT every frame -- the key emery heap fix.
+            if (weather && weather.desc !== wxIconDesc) {
+                wxIconDesc = weather.desc;
+                const wx = WX_OFFSET[weather.desc];
+                const raw = (wx !== undefined) ? loadDCI(RES[R_WX + wx]) : null;
+                wxIcon  = raw ? sdraw(raw) : null;
+                wxIconW = raw ? raw.width  : 0;
+                wxIconH = raw ? raw.height : 0;
+            }
+            if (wxIcon) render.drawDCI(wxIcon, W - PAD - ((wxIconW * S) | 0), yTop);
+        }
+        if (showDate) {
+            strokeText(DAYS[now.getDay()], PAD, yBot);                    // BL: day
+            const dateStr = MONTHS[now.getMonth()] + " " + String(now.getDate()).padStart(2, "0");
+            strokeText(dateStr, W - PAD - render.getTextWidth(dateStr, font), yBot);  // BR: date
+        }
+        // Bee on TOP: drawn after the corner complications so the minute hand is
+        // never eclipsed and the time stays readable.
+        if (!yoshiMode && beeClone) render.drawDCI(beeClone, beeDrawX, beeDrawY);
     }
 
     render.end();
