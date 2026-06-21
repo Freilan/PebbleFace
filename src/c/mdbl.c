@@ -128,8 +128,19 @@ int main(void) {
   MdblCreationRecord cr = {
     .recordSize = sizeof(MdblCreationRecord),
     .stack = 6144,
+#ifdef PBL_PLATFORM_EMERY
+    // Emery (Pebble Time 2, 200x228) has a ~22KB-smaller framebuffer than gabbro
+    // (260x260), so it can afford bigger XS pools. The weather fetch's
+    // Headers/Map construction was exhausting the SLOT pool (fxAbort: "cannot
+    // coerce undefined to object" at Map/Headers) — the heap sat right at the
+    // 118KB ceiling and the fetch's ~5KB spike tipped it over. Give slot the
+    // headroom (and a little chunk for the response body). Gabbro is unchanged.
+    .slot  = 47104,   // 40960 + 6144
+    .chunk = 18432,   // 14336 + 4096
+#else
     .slot  = 40960,
     .chunk = 14336,
+#endif
     .flags = 0,
     .fxBuildFFI = (void *)prv_build_ffi,
   };
