@@ -220,13 +220,11 @@ const BEE_PY = beeDCI ? (beeDCI.height * S) >> 1 : 0;
 // reverse. There is no bare-flower set, so the midnight hour (0 petals)
 // keeps face_2_1 (the clamp below).
 let faceSet = [], faceSetIdx = -1;
-let faceSetDraw = [];   // faceSet scaled for this platform (built once per set load,
-                        //   not per frame — on gabbro these are the originals)
 function loadFaceSet(count) {
     // Yoshi mode hides the smiley, so don't keep the face set resident — that
     // heap is what Yoshi's head + tongue need (otherwise the weather fetch
     // OOMs). Charging draws its own center face, so keep it while charging.
-    if (yoshiMode && !charging) { faceSet = []; faceSetDraw = []; faceSetIdx = -1; return; }
+    if (yoshiMode && !charging) { faceSet = []; faceSetIdx = -1; return; }
     let si = (12 - count) >> 1;
     if (si >= N_SETS) si = N_SETS - 1;
     if (si === faceSetIdx) return;
@@ -245,9 +243,6 @@ function loadFaceSet(count) {
         }
         faceSet.push(img);
     }
-    // Scale the set ONCE here (on gabbro sdraw returns the originals, so this is
-    // the same objects); the per-frame draw then never clones the face.
-    faceSetDraw = faceSet.map(sdraw);
 }
 
 // ── Lookup tables ─────────────────────────────────────────────
@@ -301,9 +296,6 @@ let tickCount = 0, animLeft = 0, animTimer = null;
 let accel = null;          // keep the instance alive — GC would unsubscribe tap
 let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
 let beeDrawX = 0, beeDrawY = 0;          // bee draw pos (so emery can draw it last)
-// Weather icon cached: (re)loaded + scaled only when the condition changes, not
-// every frame. A per-frame loadDCI + scale was a big chunk of emery's heap churn.
-let wxIcon = null, wxIconDesc = -1, wxIconW = 0, wxIconH = 0;
 // Yoshi-mode caches: head reloaded only when color*8+dir changes; tongue loaded
 // once and re-rotated per minute (mirrors the bee). Memory-neutral vs face+bee.
 let yoshiHead = null, yoshiHeadKey = -1;
@@ -327,6 +319,7 @@ function petalFrameIdx(pos) {
 
 function animTick() {
     tickCount++;
+    if ((tickCount & 15) === 0) trace("[HB] tick ", tickCount, "\n");  // TEMP heartbeat
     if (--animLeft <= 0) {     // window over: stop the timer; this last
         Timer.clear(animTimer); // draw paints the resting (frame 0) state
         animTimer = null;
@@ -650,9 +643,11 @@ async function fetchWeather(lat, lon) {
         const url = "http://api.open-meteo.com/v1/forecast"
             + "?latitude=" + lat + "&longitude=" + lon
             + "&current=temperature_2m,weather_code" + u;
+        trace("[WX] fetch start\n");   // TEMP breadcrumb (emery OOM hunt)
         // Read as text + JSON.parse: this runtime's Response.json() throws
         // "invalid value" on valid JSON, but .text() returns the body fine.
         const text = await (await fetch(url)).text();
+        trace("[WX] got ", text.length, "B\n");   // TEMP
         const data = JSON.parse(text);
         weather = {
             temp: Math.round(data.current.temperature_2m),
@@ -662,10 +657,11 @@ async function fetchWeather(lat, lon) {
             localStorage.setItem("weather", JSON.stringify(weather));
             localStorage.setItem("weatherTime", String(Date.now()));
         } catch(e) {}
+        trace("[WX] ok ", weather.temp, "\n");   // TEMP — survived the fetch
         // While an animation/cascade runs, the next tick repaints shortly —
         // skip the extra draw at this (heaviest) moment.
         if (!animTimer && !casTimer) drawScreen();
-    } catch(e) {}
+    } catch(e) { trace("[WX] err ", (e && e.message) || e, "\n"); }   // TEMP
 }
 
 // ── strokeText ────────────────────────────────────────────────
@@ -827,7 +823,7 @@ function drawScreen(event) {
         const cface = faceSet.length ? faceSet[fIdx] : null;
         if (cface) {
             render.begin();
-            render.drawDCI(faceSetDraw[fIdx], CX - ((cface.width * S) >> 1), CY - ((cface.height * S) >> 1));
+            render.drawDCI(sdraw(cface), CX - ((cface.width * S) >> 1), CY - ((cface.height * S) >> 1));
             render.end();
         }
         return;
@@ -932,9 +928,10 @@ function drawScreen(event) {
             beeClone = scl(beeDCI.clone()).rotate(Math.PI - beeAngle, BEE_PX, BEE_PY);
         }
         // Face: current set's frame, advancing ~1x/sec during the anim window.
-        const fi2 = (animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0;
-        const face = faceSet.length ? faceSet[fi2] : null;
-        if (face) render.drawDCI(faceSetDraw[fi2], CX - ((face.width * S) >> 1), CY - ((face.height * S) >> 1));
+        const face = faceSet.length
+            ? faceSet[(animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0]
+            : null;
+        if (face) render.drawDCI(sdraw(face), CX - ((face.width * S) >> 1), CY - ((face.height * S) >> 1));
         // Round watch: bee draws here, beneath the petal-anchored complications
         // (unchanged). Rect (emery): the bee is deferred and drawn LAST so it
         // stays ON TOP of the corner complications -- the time must stay readable.
@@ -994,17 +991,14 @@ function drawScreen(event) {
             const numStr = weather ? String(weather.temp) : "--";
             strokeText(numStr, PAD, yTop);                                // TL: temp
             drawDegree(PAD + render.getTextWidth(numStr, font) + 2, yTop + 1);
-            // Condition icon (TR, right-aligned), cached: reload + scale only on a
-            // condition change, NOT every frame -- the key emery heap fix.
-            if (weather && weather.desc !== wxIconDesc) {
-                wxIconDesc = weather.desc;
+            // Condition icon (TR, right-aligned). Loaded per draw (transient) so
+            // it does NOT add to the resident chunk live set the weather fetch
+            // needs -- on this tight heap, resident memory is the scarce thing.
+            if (weather) {
                 const wx = WX_OFFSET[weather.desc];
                 const raw = (wx !== undefined) ? loadDCI(RES[R_WX + wx]) : null;
-                wxIcon  = raw ? sdraw(raw) : null;
-                wxIconW = raw ? raw.width  : 0;
-                wxIconH = raw ? raw.height : 0;
+                if (raw) render.drawDCI(sdraw(raw), W - PAD - ((raw.width * S) | 0), yTop);
             }
-            if (wxIcon) render.drawDCI(wxIcon, W - PAD - ((wxIconW * S) | 0), yTop);
         }
         if (showDate) {
             strokeText(DAYS[now.getDay()], PAD, yBot);                    // BL: day
