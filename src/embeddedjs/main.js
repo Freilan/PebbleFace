@@ -213,13 +213,21 @@ try {
 
 if (!resReady) {
     // Cold/stale cache: find each resource by fingerprint. Decoding all ~61 at
-    // once OOMs, so SPREAD the scan across timer jobs (a few per job, collected
-    // between jobs). drawScreen paints just the dotted background meanwhile,
-    // since petalFrames/faceSet/beeDCI are still empty.
+    // once OOMs, so SPREAD the scan across timer jobs (a few per job). Each image
+    // decode is pinned until its job ends, so the PREVIOUS batch is collected at
+    // the START of the next job. drawScreen paints just the dotted background
+    // meanwhile, since petalFrames/faceSet/beeDCI are still empty.
     RES = new Array(R_LEN).fill(0);
     let scanId = 1;
-    const SCAN_MAX = 63, SCAN_PER = 4;     // 62 media + MOD; bitmaps/MOD load as null
+    const SCAN_MAX = 62, SCAN_PER = 3;     // 1..62 are media (bitmaps load as null); MOD=63 skipped
+    // Force a full GC: a single small alloc fits without pressuring the pool and
+    // frees nothing (that let decodes pile up and OOM). Overflow the chunk pool
+    // with many small asks -- the ask that can't fit triggers a GC that finalizes
+    // the freed decodes' app-heap data, then fits. Each ask alone is tiny, so
+    // none aborts (an over-pool single ask would).
+    const forceGC = () => { for (let i = 0; i < 20; i++) { try { new ArrayBuffer(1024); } catch(e) {} } };
     const scanStep = () => {
+        forceGC();                          // collect the previous batch's decodes
         for (let n = 0; n < SCAN_PER && scanId <= SCAN_MAX; n++, scanId++) {
             const dci = loadDCI(scanId);
             if (!dci) continue;
@@ -228,12 +236,14 @@ if (!resReady) {
         }
         if (scanId > SCAN_MAX) {
             try { localStorage.setItem("resmap2", JSON.stringify(RES)); } catch(e) {}
-            initResident();
-            loadFaceSet(petalCount());      // build the face set now ids are known
-            try { drawScreen(); } catch(e) {}
+            Timer.set(() => {               // free the last batch in a fresh job, then init
+                forceGC();
+                initResident();
+                loadFaceSet(petalCount());  // build the face set now ids are known
+                try { drawScreen(); } catch(e) {}
+            });
         } else {
-            try { new ArrayBuffer(2048); } catch(e) {}   // press GC to free this job's decodes
-            Timer.set(scanStep);                          // continue in a fresh job
+            Timer.set(scanStep);            // continue in a fresh job
         }
     };
     Timer.set(scanStep);
