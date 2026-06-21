@@ -255,12 +255,14 @@ if (!resReady) {
 // reverse. There is no bare-flower set, so the midnight hour (0 petals)
 // keeps face_2_1 (the clamp below).
 let faceSet = [], faceSetIdx = -1;
+let faceSetDraw = [];   // faceSet scaled ONCE per load (not per frame); on gabbro
+                        //   these are the originals (sdraw is a no-op at S===1)
 function loadFaceSet(count) {
     if (!resReady) return;                // ids not resolved yet (fingerprint scan)
     // Yoshi mode hides the smiley, so don't keep the face set resident — that
     // heap is what Yoshi's head + tongue need (otherwise the weather fetch
     // OOMs). Charging draws its own center face, so keep it while charging.
-    if (yoshiMode && !charging) { faceSet = []; faceSetIdx = -1; return; }
+    if (yoshiMode && !charging) { faceSet = []; faceSetDraw = []; faceSetIdx = -1; return; }
     let si = (12 - count) >> 1;
     if (si >= N_SETS) si = N_SETS - 1;
     if (si === faceSetIdx) return;
@@ -279,6 +281,10 @@ function loadFaceSet(count) {
         }
         faceSet.push(img);
     }
+    // Scale the set ONCE here so the per-frame draw never clones the face (that
+    // per-tick clone is what tipped emery's chunk pool over during animation).
+    // On gabbro sdraw is a no-op, so these are the same objects.
+    faceSetDraw = faceSet.map(sdraw);
 }
 
 // ── Lookup tables ─────────────────────────────────────────────
@@ -685,7 +691,7 @@ async function fetchWeather(lat, lon) {
         // fetch; the next drawScreen reloads it. Nudge a GC so XS actually
         // reclaims it before fetch() allocates. Gabbro has headroom -> untouched.
         if (!ROUND) {
-            faceSet = []; faceSetIdx = -1;
+            faceSet = []; faceSetDraw = []; faceSetIdx = -1;
             beeClone = null; beeCloneMin = -1;
             yoshiHead = null; yoshiHeadKey = -1; yoshiHeadDraw = null;
             tongueClone = null; tongueCloneMin = -1;
@@ -872,7 +878,7 @@ function drawScreen(event) {
         const cface = faceSet.length ? faceSet[fIdx] : null;
         if (cface) {
             render.begin();
-            render.drawDCI(sdraw(cface), CX - ((cface.width * S) >> 1), CY - ((cface.height * S) >> 1));
+            render.drawDCI(faceSetDraw[fIdx], CX - ((cface.width * S) >> 1), CY - ((cface.height * S) >> 1));
             render.end();
         }
         return;
@@ -979,10 +985,9 @@ function drawScreen(event) {
             beeClone = scl(beeDCI.clone()).rotate(Math.PI - beeAngle, BEE_PX, BEE_PY);
         }
         // Face: current set's frame, advancing ~1x/sec during the anim window.
-        const face = faceSet.length
-            ? faceSet[(animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0]
-            : null;
-        if (face) render.drawDCI(sdraw(face), CX - ((face.width * S) >> 1), CY - ((face.height * S) >> 1));
+        const fi2 = (animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0;
+        const face = faceSet.length ? faceSet[fi2] : null;
+        if (face) render.drawDCI(faceSetDraw[fi2], CX - ((face.width * S) >> 1), CY - ((face.height * S) >> 1));
         // Round watch: bee draws here, beneath the petal-anchored complications
         // (unchanged). Rect (emery): the bee is deferred and drawn LAST so it
         // stays ON TOP of the corner complications -- the time must stay readable.
