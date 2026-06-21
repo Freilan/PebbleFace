@@ -125,22 +125,16 @@ static void prv_build_ffi(FfiMachine *the, FfiApi *api) {
 int main(void) {
   Window *w = window_create();
   window_stack_push(w, true);
+  // NOTE: these pool sizes are effectively MAXED for both platforms. Emery does
+  // NOT have spare RAM despite its smaller framebuffer -- bumping slot/chunk
+  // (tried slot 47104 / chunk 18432) starved the runtime heap and the app
+  // reboot-looped immediately. So the weather-fetch OOM on emery is handled in
+  // JS instead, by freeing resident art right before the fetch (see fetchWeather).
   MdblCreationRecord cr = {
     .recordSize = sizeof(MdblCreationRecord),
     .stack = 6144,
-#ifdef PBL_PLATFORM_EMERY
-    // Emery (Pebble Time 2, 200x228) has a ~22KB-smaller framebuffer than gabbro
-    // (260x260), so it can afford bigger XS pools. The weather fetch's
-    // Headers/Map construction was exhausting the SLOT pool (fxAbort: "cannot
-    // coerce undefined to object" at Map/Headers) — the heap sat right at the
-    // 118KB ceiling and the fetch's ~5KB spike tipped it over. Give slot the
-    // headroom (and a little chunk for the response body). Gabbro is unchanged.
-    .slot  = 47104,   // 40960 + 6144
-    .chunk = 18432,   // 14336 + 4096
-#else
     .slot  = 40960,
     .chunk = 14336,
-#endif
     .flags = 0,
     .fxBuildFFI = (void *)prv_build_ffi,
   };

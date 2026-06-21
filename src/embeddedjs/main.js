@@ -643,6 +643,18 @@ async function fetchWeather(lat, lon) {
         const url = "http://api.open-meteo.com/v1/forecast"
             + "?latitude=" + lat + "&longitude=" + lon
             + "&current=temperature_2m,weather_code" + u;
+        // Emery runs right at the heap ceiling, and the fetch's Headers/Response
+        // briefly need a few KB the resident center art is holding -- which made
+        // fetch() abort (slot OOM in Headers/Map). Free that art just before the
+        // fetch; the next drawScreen reloads it. Nudge a GC so XS actually
+        // reclaims it before fetch() allocates. Gabbro has headroom -> untouched.
+        if (!ROUND) {
+            faceSet = []; faceSetIdx = -1;
+            beeClone = null; beeCloneMin = -1;
+            yoshiHead = null; yoshiHeadKey = -1; yoshiHeadDraw = null;
+            tongueClone = null; tongueCloneMin = -1;
+            try { new ArrayBuffer(4096); } catch(e) {}   // nudge a collection
+        }
         trace("[WX] fetch start\n");   // TEMP breadcrumb (emery OOM hunt)
         // Read as text + JSON.parse: this runtime's Response.json() throws
         // "invalid value" on valid JSON, but .text() returns the body fine.
@@ -658,6 +670,7 @@ async function fetchWeather(lat, lon) {
             localStorage.setItem("weatherTime", String(Date.now()));
         } catch(e) {}
         trace("[WX] ok ", weather.temp, "\n");   // TEMP — survived the fetch
+        if (!ROUND) loadFaceSet(petalCount());   // restore the center art freed above
         // While an animation/cascade runs, the next tick repaints shortly —
         // skip the extra draw at this (heaviest) moment.
         if (!animTimer && !casTimer) drawScreen();
