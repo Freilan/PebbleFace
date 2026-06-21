@@ -157,36 +157,34 @@ function drawDot(px, py) {
     render.fillRectangle(C_DOT, px-2, py+4, 4, 1);
 }
 
-let RES = null;
-try { RES = new Uint8Array(Natives.ids); } catch(e) {}
-if (!RES || RES.length < R_LEN) {
-    // No FFI table on this firmware (Natives absent — confirmed on-device).
-    // The build's resource ball is EXACT media order in this toolchain
-    // (verified against the build's resource_ball line), so map each table slot
-    // straight to its media-order id. This replaces the old viewbox-fingerprint
-    // scan, which loaded EVERY resource in one job — fine at ~28, but it OOM'd
-    // (reboot loop) once the 33 Yoshi PDCs pushed the count past 60, and it
-    // could not tell the 32 same-size Yoshi heads apart anyway. Media order is
-    // assigned here in the same sequence as package.json "media".
-    RES = new Array(R_LEN);
-    let id = 1;
-    for (let i = 0; i < 6;  i++) RES[R_WX    + i] = id++;  // weather icons  1-6
-    for (let i = 0; i < 3;  i++) RES[R_PETAL + i] = id++;  // petals         7-9
-    for (let i = 0; i < 3;  i++) RES[R_FALL  + i] = id++;  // falls          10-12
-    for (let i = 0; i < 3;  i++) RES[R_GROW  + i] = id++;  // grows          13-15
-    for (let i = 0; i < 12; i++) RES[R_FACE  + i] = id++;  // faces          16-27
-    RES[R_BEE] = id++;                                     // bee            28
-    for (let i = 0; i < 32; i++) RES[R_YOSHI + i] = id++;  // yoshi heads    29-60
-    RES[R_TONGUE] = id++;                                  // tongue         61
-}
+// Resource ids are the position of each resource in the build's RESOURCE BALL
+// (1-based). This firmware has no FFI (Natives absent) and no by-name lookup, so
+// the JS side must know that order. It is NOT media order and NOT stable across
+// CloudPebble re-imports: a fresh import reshuffled it (the build log's
+// `resource_ball` line is the only authority). This table is therefore PINNED to
+// the current project's order, captured from that line and mapped to the R_*
+// slots below (index = R_PETAL..R_TONGUE). If the order ever shifts again (another
+// re-import, or editing resources in CloudPebble), the anchor check below traces
+// `[RES] anchor FAILED` and this array must be recaptured from the new build log.
+//   layout: [R_PETAL ×3][R_FALL ×3][R_GROW ×3][R_FACE ×12][R_BEE][R_WX ×6]
+//           [R_YOSHI ×32 (green,lblue,red,yellow each ×8 dirs)][R_TONGUE]
+const RES = [
+    55, 56, 57, 58, 2, 19, 59, 60,
+    61, 39, 40, 37, 38, 47, 48, 45,
+    46, 43, 44, 41, 42, 36, 50, 51,
+    49, 52, 53, 54, 7, 9, 6, 4,
+    1, 3, 5, 8, 33, 35, 32, 30,
+    28, 29, 31, 34, 15, 17, 14, 12,
+    10, 11, 13, 16, 25, 27, 24, 22,
+    20, 21, 23, 26, 18
+];
 
-// Emery bring-up guard. RES is mapped by MEDIA ORDER (this firmware has no FFI),
-// which was verified on gabbro; emery's resource ball could be ordered
-// differently, which would scramble ALL art. The art is shared (same PDC files,
-// same native sizes on every platform), so probe three known native sizes — if
-// they don't match, the mapping is wrong and this traces why. Round watches
-// (gabbro, already verified) skip it. Strip once Time 2 hardware confirms.
-if (!ROUND) {
+// RES-order guard (BOTH platforms). The RES table above is pinned to one build's
+// resource-ball order; if a rebuild/re-import reshuffles it, the art scrambles.
+// Probe three known native sizes (petal 60x130, bee 50x50, face 104x106) — if any
+// doesn't match, the order changed and this traces exactly which slot is wrong so
+// the table can be recaptured from the new build log.
+{
     const chk = [[R_PETAL, 60, 130], [R_BEE, 50, 50], [R_FACE, 104, 106]];
     for (let i = 0; i < chk.length; i++) {
         const d = loadDCI(RES[chk[i][0]]);
