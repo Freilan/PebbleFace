@@ -405,7 +405,8 @@
         },
         "sdkVersion": "3",
         "targetPlatforms": [
-            "gabbro"
+            "gabbro",
+            "emery"
         ],
         "uuid": "45a40590-9e1c-417b-ad42-1c9a0de8858f",
         "watchapp": {

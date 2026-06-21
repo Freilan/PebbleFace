@@ -60,6 +60,14 @@ const W  = render.width;
 const H  = render.height;
 const CX = W >> 1;
 const CY = H >> 1;
+// Master scale + shape. The art is authored for a 260px-wide round screen; on a
+// narrower platform (e.g. emery, the Pebble Time 2, 200x228 rectangular) every
+// PDC is shrunk by S to fit. On gabbro (260x260) S === 1 and ROUND === true, so
+// every value derived from them below collapses to its original literal — the
+// round-watch output is byte-identical to before.
+const BASE_W = 260;
+const S      = W / BASE_W;
+const ROUND  = (W === H);
 const PETAL_MID_R = Math.round(W * 0.31);
 const BEE_R       = Math.round(W * 0.44);
 const TWO_PI      = Math.PI * 2;
@@ -71,12 +79,13 @@ const DOT_R_SQ    = 126 * 126;
 // (the tongue's pivot) lands just below center. The tongue rotates about that
 // mouth point to follow the minute. All offsets are in pixels from (CX, CY).
 const YOSHI_HEAD_DX  = 0, YOSHI_HEAD_DY  = 0;    // head image-center offset (centered)
-const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = 52;   // mouth = tongue pivot (~46px below
-                                                 // center, at Yoshi's mouth opening)
+const YOSHI_PIVOT_DX = 0, YOSHI_PIVOT_DY = Math.round(52 * S);  // mouth = tongue
+                                                 // pivot (~46px below center on the
+                                                 // 260 screen), at Yoshi's mouth
 const YOSHI_TONGUE_DRAW_FIRST = false;           // false = tongue on top of head
-const TONGUE_R   = 131;   // the ball (the minute POINTER) orbits the watch CENTER
-const TONGUE_TIP = 6;     //   at radius (TONGUE_R - TONGUE_TIP) = 125, like a real
-                          //   minute hand, staying just inside the screen edge.
+const TONGUE_EDGE = 5;    // the ball (the minute POINTER) orbits the watch CENTER at
+                          //   radius (BASE_W/2 - TONGUE_EDGE)*S, like a real minute
+                          //   hand, staying just inside the screen edge on each watch.
 const TONGUE_W   = 1.0;   // thickness multiplier (x-axis only); 1.0 = native width.
                           // Length (y) auto-scales to reach the ball; this stays
                           // fixed so the tongue keeps a constant thickness.
@@ -127,6 +136,27 @@ function loadDCI(id) {
     catch(e) { return null; }
 }
 
+// Display-scale helpers (see S above). On gabbro (S === 1) both are pass-throughs:
+// scl() returns the clone untouched, sdraw() returns the original image with no
+// extra allocation — so the round-watch render path is unchanged. On a smaller
+// platform they apply the master scale S (PDC is vector, so this is memory-free).
+function scl(clone)  { return S === 1 ? clone : clone.scale(S, S); }  // scale a clone in place
+function sdraw(dci)  { return S === 1 ? dci   : dci.clone().scale(S, S); }  // ready-to-draw image
+
+// One background dot (a 9px dimple) centered at (px, py). Fixed size on every
+// platform — the dots read as a texture, not as scaled art.
+function drawDot(px, py) {
+    render.fillRectangle(C_DOT, px-2, py-4, 4, 1);
+    render.fillRectangle(C_DOT, px-3, py-3, 6, 1);
+    render.fillRectangle(C_DOT, px-4, py-2, 8, 1);
+    render.fillRectangle(C_DOT, px-4, py-1, 8, 1);
+    render.fillRectangle(C_DOT, px-4, py,   8, 1);
+    render.fillRectangle(C_DOT, px-4, py+1, 8, 1);
+    render.fillRectangle(C_DOT, px-4, py+2, 8, 1);
+    render.fillRectangle(C_DOT, px-3, py+3, 6, 1);
+    render.fillRectangle(C_DOT, px-2, py+4, 4, 1);
+}
+
 let RES = null;
 try { RES = new Uint8Array(Natives.ids); } catch(e) {}
 if (!RES || RES.length < R_LEN) {
@@ -150,6 +180,24 @@ if (!RES || RES.length < R_LEN) {
     RES[R_TONGUE] = id++;                                  // tongue         61
 }
 
+// Emery bring-up guard. RES is mapped by MEDIA ORDER (this firmware has no FFI),
+// which was verified on gabbro; emery's resource ball could be ordered
+// differently, which would scramble ALL art. The art is shared (same PDC files,
+// same native sizes on every platform), so probe three known native sizes — if
+// they don't match, the mapping is wrong and this traces why. Round watches
+// (gabbro, already verified) skip it. Strip once Time 2 hardware confirms.
+if (!ROUND) {
+    const chk = [[R_PETAL, 60, 130], [R_BEE, 50, 50], [R_FACE, 104, 106]];
+    for (let i = 0; i < chk.length; i++) {
+        const d = loadDCI(RES[chk[i][0]]);
+        if (!d || d.width !== chk[i][1] || d.height !== chk[i][2]) {
+            trace("[RES] anchor FAILED slot=", chk[i][0],
+                  " got=", d ? (d.width + "x" + d.height) : "null", "\n");
+            break;
+        }
+    }
+}
+
 // Resident images: the 3 petal idle frames, the bee, and the current face
 // set (2 frames, reloaded as the petal count crosses sets). Fall/grow
 // frames are loaded one at a time only while a transition plays — keeping
@@ -161,10 +209,10 @@ for (let i = 0; i < 3; i++) {
     if (f) petalFrames.push(f);
 }
 const beeDCI = yoshiMode ? null : loadDCI(RES[R_BEE]);  // bee unused in Yoshi mode
-const P_PX   = petalFrames.map(f => f.width >> 1);
-const P_PY   = petalFrames.map(f => f.height);
-const BEE_PX = beeDCI ? beeDCI.width  >> 1 : 0;
-const BEE_PY = beeDCI ? beeDCI.height >> 1 : 0;
+const P_PX   = petalFrames.map(f => (f.width  * S) >> 1);  // scaled bottom-center
+const P_PY   = petalFrames.map(f => (f.height * S) | 0);   //   anchors (== native on gabbro)
+const BEE_PX = beeDCI ? (beeDCI.width  * S) >> 1 : 0;
+const BEE_PY = beeDCI ? (beeDCI.height * S) >> 1 : 0;
 
 // Face sets are named for the PETALS REMAINING they cover: face_12_11 shows
 // while 12 or 11 petals are up ... face_2_1 while 2 or 1 are. Media order
@@ -250,6 +298,7 @@ let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
 // Yoshi-mode caches: head reloaded only when color*8+dir changes; tongue loaded
 // once and re-rotated per minute (mirrors the bee). Memory-neutral vs face+bee.
 let yoshiHead = null, yoshiHeadKey = -1;
+let yoshiHeadDraw = null;   // head scaled for this platform, cached with the head
 let tongueDCI = null, tongueClone = null, tongueCloneMin = -1;
 let tongueDrawX = 0, tongueDrawY = 0;   // scaled tongue's draw position (per minute)
 
@@ -647,31 +696,42 @@ function drawScreen(event) {
     // field in one begin/end — that's what forced displayListLength=16384).
     // Bands meet halfway between rows and tile the screen exactly; a dot is
     // 9px tall on a 27px grid, so no dot ever straddles a band.
-    for (let ddy = -126; ddy <= 126; ddy += DOT_GRID) {
-        const yTop = (ddy === -126) ? 0 : CY + ddy - (DOT_GRID >> 1);
-        const yBot = (ddy + DOT_GRID > 126) ? H : CY + ddy + DOT_GRID - (DOT_GRID >> 1);
-        render.begin(0, yTop, W, yBot - yTop);
-        render.fillRectangle(C_BG, 0, 0, W, H);
-        if (showDots) {
-            const row = Math.round((ddy + 126) / DOT_GRID);
-            const ox  = (row % 2 === 0) ? 0 : DOT_GRID >> 1;
-            for (let ddx = -126; ddx <= 126; ddx += DOT_GRID) {
-                const ax = ddx + ox;
-                if (ax * ax + ddy * ddy < DOT_R_SQ - 150) {
-                    const px = CX + ax, py = CY + ddy;
-                    render.fillRectangle(C_DOT, px-2, py-4, 4, 1);
-                    render.fillRectangle(C_DOT, px-3, py-3, 6, 1);
-                    render.fillRectangle(C_DOT, px-4, py-2, 8, 1);
-                    render.fillRectangle(C_DOT, px-4, py-1, 8, 1);
-                    render.fillRectangle(C_DOT, px-4, py,   8, 1);
-                    render.fillRectangle(C_DOT, px-4, py+1, 8, 1);
-                    render.fillRectangle(C_DOT, px-4, py+2, 8, 1);
-                    render.fillRectangle(C_DOT, px-3, py+3, 6, 1);
-                    render.fillRectangle(C_DOT, px-2, py+4, 4, 1);
+    if (ROUND) {
+        // Round watch (gabbro): the dot field is clipped to a circle so the
+        // corners stay bare (matching the bezel). Bands span -126..126 about CY.
+        for (let ddy = -126; ddy <= 126; ddy += DOT_GRID) {
+            const yTop = (ddy === -126) ? 0 : CY + ddy - (DOT_GRID >> 1);
+            const yBot = (ddy + DOT_GRID > 126) ? H : CY + ddy + DOT_GRID - (DOT_GRID >> 1);
+            render.begin(0, yTop, W, yBot - yTop);
+            render.fillRectangle(C_BG, 0, 0, W, H);
+            if (showDots) {
+                const row = Math.round((ddy + 126) / DOT_GRID);
+                const ox  = (row % 2 === 0) ? 0 : DOT_GRID >> 1;
+                for (let ddx = -126; ddx <= 126; ddx += DOT_GRID) {
+                    const ax = ddx + ox;
+                    if (ax * ax + ddy * ddy < DOT_R_SQ - 150) drawDot(CX + ax, CY + ddy);
                 }
             }
+            render.end();
         }
-        render.end();
+    } else {
+        // Rectangular watch (emery): dots fill the whole screen, edge to edge.
+        // Same banding (one row per band) so the display list stays small.
+        const HALF = DOT_GRID >> 1;
+        let row = 0;
+        for (let cy = HALF; ; cy += DOT_GRID, row++) {
+            const yTop = (row === 0) ? 0 : cy - HALF;
+            if (yTop >= H) break;
+            let yBot = cy + DOT_GRID - HALF;
+            if (yBot > H) yBot = H;
+            render.begin(0, yTop, W, yBot - yTop);
+            render.fillRectangle(C_BG, 0, 0, W, H);
+            if (showDots) {
+                const ox = (row % 2 === 0) ? 0 : HALF;
+                for (let cx = ox; cx < W; cx += DOT_GRID) drawDot(cx, cy);
+            }
+            render.end();
+        }
     }
 
     // Charging: a petal progress bar over the same background. Petals fill
@@ -681,7 +741,7 @@ function drawScreen(event) {
         if (petalFrames.length) {
             const STEP = 30 * Math.PI / 180;
             const f0 = petalFrames[0];
-            const fpx = f0.width >> 1, fpy = f0.height;
+            const fpx = (f0.width * S) >> 1, fpy = (f0.height * S) | 0;
           if (cf < SPIN_FRAMES) {
             // Spin-up flourish: a comet sweeps clockwise once around before the
             // bar settles. The newest petal GROWS in at the leading edge, the
@@ -700,7 +760,7 @@ function drawScreen(event) {
             for (let d = 1; d < SPIN_ARC; d++) {
                 const pos = posOf(head - d);
                 const ar  = -(pos - 1) * STEP;
-                if (!clone) clone = f0.clone().rotate(ar, fpx, fpy);
+                if (!clone) clone = scl(f0.clone()).rotate(ar, fpx, fpy);
                 else        clone.rotate(ar - ang, fpx, fpy);
                 ang = ar;
                 render.begin(); render.drawDCI(clone, CX - fpx, CY - fpy); render.end();
@@ -708,15 +768,15 @@ function drawScreen(event) {
             // Newest petal growing in at the leading edge.
             const gd = loadDCI(RES[R_GROW + frm]);
             if (gd) {
-                const gx = gd.width >> 1, gy = gd.height;
-                const c = gd.clone().rotate(-(posOf(head) - 1) * STEP, gx, gy);
+                const gx = (gd.width * S) >> 1, gy = (gd.height * S) | 0;
+                const c = scl(gd.clone()).rotate(-(posOf(head) - 1) * STEP, gx, gy);
                 render.begin(); render.drawDCI(c, CX - gx, CY - gy); render.end();
             }
             // Oldest petal falling off the trailing edge.
             const dd = loadDCI(RES[R_FALL + frm]);
             if (dd) {
-                const dx = dd.width >> 1, dy = dd.height;
-                const c = dd.clone().rotate(-(posOf(head - SPIN_ARC) - 1) * STEP, dx, dy);
+                const dx = (dd.width * S) >> 1, dy = (dd.height * S) | 0;
+                const c = scl(dd.clone()).rotate(-(posOf(head - SPIN_ARC) - 1) * STEP, dx, dy);
                 render.begin(); render.drawDCI(c, CX - dx, CY - dy); render.end();
             }
           } else {
@@ -731,7 +791,7 @@ function drawScreen(event) {
             let clone = null, ang = 0;
             for (let pos = 1; pos <= solidMax; pos++) {
                 const ar = -(pos - 1) * STEP;
-                if (!clone) clone = f0.clone().rotate(ar, fpx, fpy);
+                if (!clone) clone = scl(f0.clone()).rotate(ar, fpx, fpy);
                 else        clone.rotate(ar - ang, fpx, fpy);
                 ang = ar;
                 render.begin(); render.drawDCI(clone, CX - fpx, CY - fpy); render.end();
@@ -745,8 +805,8 @@ function drawScreen(event) {
                 else { const c = cf & 3; gfr = c < 3 ? c : 1; } // pulse 0,1,2,1
                 const gd = loadDCI(RES[R_GROW + gfr]);
                 if (gd) {
-                    const gx = gd.width >> 1, gy = gd.height;
-                    const c = gd.clone().rotate(-(ff - 1) * STEP, gx, gy);
+                    const gx = (gd.width * S) >> 1, gy = (gd.height * S) | 0;
+                    const c = scl(gd.clone()).rotate(-(ff - 1) * STEP, gx, gy);
                     render.begin(); render.drawDCI(c, CX - gx, CY - gy); render.end();
                 }
             }
@@ -758,7 +818,7 @@ function drawScreen(event) {
         const cface = faceSet.length ? faceSet[fIdx] : null;
         if (cface) {
             render.begin();
-            render.drawDCI(cface, CX - (cface.width >> 1), CY - (cface.height >> 1));
+            render.drawDCI(sdraw(cface), CX - ((cface.width * S) >> 1), CY - ((cface.height * S) >> 1));
             render.end();
         }
         return;
@@ -776,7 +836,7 @@ function drawScreen(event) {
             const fi = petalFrameIdx(pos);
             const ar = -(pos - 1) * STEP;
             let pd = clones[fi];
-            if (!pd) pd = clones[fi] = petalFrames[fi].clone().rotate(ar, P_PX[fi], P_PY[fi]);
+            if (!pd) pd = clones[fi] = scl(petalFrames[fi].clone()).rotate(ar, P_PX[fi], P_PY[fi]);
             else     pd.rotate(ar - angles[fi], P_PX[fi], P_PY[fi]);
             angles[fi] = ar;
             render.begin();
@@ -790,8 +850,8 @@ function drawScreen(event) {
         for (let i = 0; i < plan.length; i++) {
             const s = plan[i];
             if (!s.dci) continue;
-            const px = s.dci.width >> 1, py = s.dci.height;
-            const fd = s.dci.clone().rotate(-(s.pos - 1) * STEP, px, py);
+            const px = (s.dci.width * S) >> 1, py = (s.dci.height * S) | 0;
+            const fd = scl(s.dci.clone()).rotate(-(s.pos - 1) * STEP, px, py);
             render.begin();
             render.drawDCI(fd, CX - px, CY - py);
             render.end();
@@ -811,6 +871,7 @@ function drawScreen(event) {
         if (key !== yoshiHeadKey) {
             yoshiHeadKey = key;
             yoshiHead = loadDCI(RES[R_YOSHI + key]);
+            yoshiHeadDraw = yoshiHead ? sdraw(yoshiHead) : null;  // scale once per head
         }
         if (!tongueDCI) tongueDCI = loadDCI(RES[R_TONGUE]);
         const mouthX = CX + YOSHI_PIVOT_DX, mouthY = CY + YOSHI_PIVOT_DY;
@@ -824,7 +885,7 @@ function drawScreen(event) {
             // off to the side (worst on the top half). Instead: target the ball at
             // RT from center, then solve the tongue's own length + rotation about
             // the mouth so its tip reaches that target.
-            const RT = TONGUE_R - TONGUE_TIP;          // ball's distance from CENTER
+            const RT = Math.round((BASE_W / 2 - TONGUE_EDGE) * S);  // ball's distance from CENTER
             const vx = RT * Math.sin(ang);             // mouth -> ball, x
             const vy = -RT * Math.cos(ang) - YOSHI_PIVOT_DY;  // mouth -> ball, y
             const L = Math.sqrt(vx * vx + vy * vy);    // tongue length to reach it
@@ -835,16 +896,16 @@ function drawScreen(event) {
             // at the art's bottom-center root (ball = far end / image top); after
             // scale(TONGUE_W,s) the root is at (w/2·TONGUE_W, h·s). rotate(-phi)
             // (petal convention) points the ball along the CENTER ray.
-            const px = (tongueDCI.width >> 1) * TONGUE_W, py = tongueDCI.height * s;
-            tongueClone = tongueDCI.clone().scale(TONGUE_W, s).rotate(-phi, px, py);
+            const px = (tongueDCI.width >> 1) * TONGUE_W * S, py = tongueDCI.height * s;
+            tongueClone = tongueDCI.clone().scale(TONGUE_W * S, s).rotate(-phi, px, py);
             tongueDrawX = mouthX - px;
             tongueDrawY = mouthY - py;
         }
         const head = yoshiHead;
         const drawHead = () => {
-            if (head) render.drawDCI(head,
-                CX + YOSHI_HEAD_DX - (head.width  >> 1),
-                CY + YOSHI_HEAD_DY - (head.height >> 1));
+            if (head && yoshiHeadDraw) render.drawDCI(yoshiHeadDraw,
+                CX + YOSHI_HEAD_DX - ((head.width  * S) >> 1),
+                CY + YOSHI_HEAD_DY - ((head.height * S) >> 1));
         };
         const drawTongue = () => {
             if (tongueClone) render.drawDCI(tongueClone, tongueDrawX, tongueDrawY);
@@ -859,20 +920,20 @@ function drawScreen(event) {
         const beeY     = Math.round(CY - BEE_R * Math.cos(beeAngle));
         if (beeDCI && minutes !== beeCloneMin) {
             beeCloneMin = minutes;
-            beeClone = beeDCI.clone().rotate(Math.PI - beeAngle, BEE_PX, BEE_PY);
+            beeClone = scl(beeDCI.clone()).rotate(Math.PI - beeAngle, BEE_PX, BEE_PY);
         }
         // Face: current set's frame, advancing ~1x/sec during the anim window.
         const face = faceSet.length
             ? faceSet[(animLeft && faceSet.length > 1) ? ((tickCount / FACE_TICKS) | 0) % faceSet.length : 0]
             : null;
-        if (face) render.drawDCI(face, CX - (face.width >> 1), CY - (face.height >> 1));
+        if (face) render.drawDCI(sdraw(face), CX - ((face.width * S) >> 1), CY - ((face.height * S) >> 1));
         if (beeClone) render.drawDCI(beeClone, beeX - BEE_PX, beeY - BEE_PY);
     }
 
     let w, a;
     // In Yoshi mode, nudge the date 10px left and the weather 10px right so they
     // clear Yoshi's wider head a little.
-    const txtDX = yoshiMode ? 10 : 0;
+    const txtDX = yoshiMode ? Math.round(10 * S) : 0;
 
     if (showDate) {
         a = petalAnchor(300);
@@ -905,9 +966,9 @@ function drawScreen(event) {
             const wx = WX_OFFSET[weather.desc];
             if (wx !== undefined) {
                 const icon = loadDCI(RES[R_WX + wx]);
-                if (icon) render.drawDCI(icon,
-                    a.x - (icon.width  >> 1) + txtDX,
-                    a.y - (icon.height >> 1));
+                if (icon) render.drawDCI(sdraw(icon),
+                    a.x - ((icon.width  * S) >> 1) + txtDX,
+                    a.y - ((icon.height * S) >> 1));
             }
         }
     }
