@@ -338,6 +338,10 @@ let tickCount = 0, animLeft = 0, animTimer = null;
 let accel = null;          // keep the instance alive — GC would unsubscribe tap
 let beeClone = null, beeCloneMin = -1;   // bee rotated once per minute
 let beeDrawX = 0, beeDrawY = 0;          // bee draw pos (so emery can draw it last)
+// Idle-petal clones, created+scaled ONCE then rotated in place every frame. The
+// old code re-cloned+re-scaled 3 petals every repaint; on emery that per-frame
+// scale churn overflowed the chunk pool during animation (reboot loop).
+let petalClones = [null, null, null], petalAngles = [0, 0, 0];
 // Yoshi-mode caches: head reloaded only when color*8+dir changes; tongue loaded
 // once and re-rotated per minute (mirrors the bee). Memory-neutral vs face+bee.
 let yoshiHead = null, yoshiHeadKey = -1;
@@ -890,15 +894,16 @@ function drawScreen(event) {
     // rotated incrementally to each position.
     if (petalFrames.length) {
         const STEP   = 30 * Math.PI / 180;
-        const clones = [null, null, null], angles = [0, 0, 0];
         for (let pos = 12; pos >= 1; pos--) {
             if (!petalVisible(pos) || hideSet.indexOf(pos) >= 0) continue;
             const fi = petalFrameIdx(pos);
             const ar = -(pos - 1) * STEP;
-            let pd = clones[fi];
-            if (!pd) pd = clones[fi] = scl(petalFrames[fi].clone()).rotate(ar, P_PX[fi], P_PY[fi]);
-            else     pd.rotate(ar - angles[fi], P_PX[fi], P_PY[fi]);
-            angles[fi] = ar;
+            // Persistent clone per frame: created+scaled once, then only rotated
+            // (incrementally) to each position -- no per-frame clone/scale churn.
+            let pd = petalClones[fi];
+            if (!pd) pd = petalClones[fi] = scl(petalFrames[fi].clone());
+            pd.rotate(ar - petalAngles[fi], P_PX[fi], P_PY[fi]);
+            petalAngles[fi] = ar;
             render.begin();
             render.drawDCI(pd, CX - P_PX[fi], CY - P_PY[fi]);
             render.end();
