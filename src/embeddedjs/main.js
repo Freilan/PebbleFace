@@ -1042,7 +1042,9 @@ function drawScreen(event) {
     } else {
         // Rect watch (emery): complications in the four corners so the flower
         // stays clean.  TL temperature, TR weather icon, BL day, BR date.
-        const PAD = 5;
+        // PAD insets all four equally (x: PAD..W-PAD, y: PAD..H-PAD), so it also
+        // pulls them diagonally clear of the Time 2's curved corner bezels.
+        const PAD = 10;
         const yTop = PAD, yBot = H - PAD - font.height;
         if (showWeather) {
             const numStr = weather ? String(weather.temp) : "--";
