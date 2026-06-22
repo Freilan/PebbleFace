@@ -365,7 +365,6 @@ function petalFrameIdx(pos) {
 
 function animTick() {
     tickCount++;
-    if ((tickCount & 15) === 0) trace("[HB] tick ", tickCount, "\n");  // TEMP heartbeat
     if (--animLeft <= 0) {     // window over: stop the timer; this last
         Timer.clear(animTimer); // draw paints the resting (frame 0) state
         animTimer = null;
@@ -701,11 +700,9 @@ async function fetchWeather(lat, lon) {
             tongueClone = null; tongueCloneMin = -1;
             try { new ArrayBuffer(4096); } catch(e) {}   // nudge a collection
         }
-        trace("[WX] fetch start\n");   // TEMP breadcrumb (emery OOM hunt)
         // Read as text + JSON.parse: this runtime's Response.json() throws
         // "invalid value" on valid JSON, but .text() returns the body fine.
         const text = await (await fetch(url)).text();
-        trace("[WX] got ", text.length, "B\n");   // TEMP
         const data = JSON.parse(text);
         weather = {
             temp: Math.round(data.current.temperature_2m),
@@ -715,12 +712,11 @@ async function fetchWeather(lat, lon) {
             localStorage.setItem("weather", JSON.stringify(weather));
             localStorage.setItem("weatherTime", String(Date.now()));
         } catch(e) {}
-        trace("[WX] ok ", weather.temp, "\n");   // TEMP — survived the fetch
         if (!ROUND) loadFaceSet(petalCount());   // restore the center art freed above
         // While an animation/cascade runs, the next tick repaints shortly —
         // skip the extra draw at this (heaviest) moment.
         if (!animTimer && !casTimer) drawScreen();
-    } catch(e) { trace("[WX] err ", (e && e.message) || e, "\n"); }   // TEMP
+    } catch(e) {}
 }
 
 // ── strokeText ────────────────────────────────────────────────
