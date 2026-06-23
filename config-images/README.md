@@ -1,6 +1,7 @@
 # config-images
 
-Thumbnails for the **Yoshi Color** picker on the Clay settings page.
+Thumbnails for the **Yoshi Color** picker on the hosted settings page
+(`docs/config.html`).
 
 These are **not** watch resources — they are not in `package.json` and are never
 bundled into the app (the watch is at its resource-slot ceiling). The settings

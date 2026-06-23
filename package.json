@@ -1,8 +1,7 @@
 {
     "author": "PossumCo",
     "dependencies": {
-        "@moddable/pebbleproxy": "^0.1.8",
-        "@rebble/clay": "^1.0.10"
+        "@moddable/pebbleproxy": "^0.1.8"
     },
     "keywords": [
         "pebble-app"
