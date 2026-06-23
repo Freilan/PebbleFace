@@ -130,12 +130,20 @@ int main(void) {
   // (tried slot 47104 / chunk 18432) starved the runtime heap and the app
   // reboot-looped immediately. So the weather-fetch OOM on emery is handled in
   // JS instead, by freeing resident art right before the fetch (see fetchWeather).
+  // TEMP (diagnostic): log the XS machine's slot/chunk/stack via app_log so we
+  // can see the ACTUAL pool sizes the firmware gives this mod and how full the
+  // chunk pool is at the "memory full" abort. Stale state and three JS-level
+  // memory cuts changed nothing, which points below the JS -- either the
+  // updated firmware can't satisfy this 14336-byte chunk request, or the
+  // hand-rolled creation record above no longer matches the SDK's
+  // ModdableCreationRecord ABI. The numbers will tell us which. Revert to 0
+  // once diagnosed.
   MdblCreationRecord cr = {
     .recordSize = sizeof(MdblCreationRecord),
     .stack = 6144,
     .slot  = 40960,
     .chunk = 14336,
-    .flags = 0,
+    .flags = kModdableCreationFlagLogInstrumentation,
     .fxBuildFFI = (void *)prv_build_ffi,
   };
   moddable_createMachine((ModdableCreationRecord *)&cr);
