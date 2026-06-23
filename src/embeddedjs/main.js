@@ -1145,7 +1145,16 @@ const FaceApplication = Application.template($ => ({
 }));
 
 export default new FaceApplication(null, {
-    displayListLength: 4096,    // background draws per dot-row band, so the
-    touchCount: 0,              // worst begin/end is ~90 rects, not ~700
-    pixels: screen.width * 4,
+    // displayListLength and pixels both come out of the XS CHUNK pool, so they
+    // are trimmed to claw back boot-time chunk headroom after the firmware
+    // update tightened it (the watch now aborts at load with
+    // xsPlatform.c fxAbort "memory full"). displayList: the worst single
+    // begin/end is one dot-row band (~90 rects ~= 1.7KB; the count is bounded by
+    // the dot grid), so 2048 holds it -- and a display-list overflow is caught
+    // by drawScreen's try/catch (a skipped frame, repainted next tick, never a
+    // crash). pixels: Poco renders any region by striping it through this
+    // scanline buffer, so 2 rows are correct, just more passes per repaint.
+    displayListLength: 2048,    // was 4096
+    touchCount: 0,
+    pixels: screen.width * 2,   // was screen.width * 4
 });
