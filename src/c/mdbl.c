@@ -125,24 +125,27 @@ static void prv_build_ffi(FfiMachine *the, FfiApi *api) {
 int main(void) {
   Window *w = window_create();
   window_stack_push(w, true);
-  // NOTE: these pool sizes are effectively MAXED for both platforms. Emery does
-  // NOT have spare RAM despite its smaller framebuffer -- bumping slot/chunk
-  // (tried slot 47104 / chunk 18432) starved the runtime heap and the app
-  // reboot-looped immediately. So the weather-fetch OOM on emery is handled in
-  // JS instead, by freeing resident art right before the fetch (see fetchWeather).
-  // TEMP (diagnostic): log the XS machine's slot/chunk/stack via app_log so we
-  // can see the ACTUAL pool sizes the firmware gives this mod and how full the
-  // chunk pool is at the "memory full" abort. Stale state and three JS-level
-  // memory cuts changed nothing, which points below the JS -- either the
-  // updated firmware can't satisfy this 14336-byte chunk request, or the
-  // hand-rolled creation record above no longer matches the SDK's
-  // ModdableCreationRecord ABI. The numbers will tell us which. Revert to 0
-  // once diagnosed.
+  // Instrumented boot on the updated firmware pinned the abort cause. The record
+  // IS honored (stack reported back as our 6144), but the PRELOADED mod consumes
+  // ~9KB of the 14336-byte chunk pool, leaving only ~5KB for runtime -- and the
+  // resident art + draw buffers need more than that, so chunk fills and aborts
+  // at boot. Slot (8KB used of 40960) and stack are fine; chunk is the sole
+  // bottleneck. Critically, the same sample showed ~62KB of app heap still FREE,
+  // so the OLD "pools are MAXED, bumping reboot-loops" note (true on the
+  // pre-update firmware, when free heap was tiny) no longer holds.
+  //
+  // So grow chunk into that free heap. 32768 leaves ~23KB of runtime chunk after
+  // the ~9KB preload -- clearing the ~10KB weather-fetch / animation peak -- while
+  // still leaving the app heap ~43KB free. (The fetch-time art-freeing in
+  // fetchWeather stays as belt-and-braces for emery.)
+  //
+  // The instrumentation flag stays on for THIS build to confirm the new chunk
+  // headroom and a clean boot; revert .flags to 0 once verified.
   MdblCreationRecord cr = {
     .recordSize = sizeof(MdblCreationRecord),
     .stack = 6144,
     .slot  = 40960,
-    .chunk = 14336,
+    .chunk = 32768,    // was 14336; preload eats ~9KB, runtime needs the rest
     .flags = kModdableCreationFlagLogInstrumentation,
     .fxBuildFFI = (void *)prv_build_ffi,
   };
