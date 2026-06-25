@@ -2,6 +2,12 @@
     "include": [
         "$(MODDABLE)/examples/manifest_mod.json"
     ],
+    "creation": {
+        "static": 0,
+        "chunk": { "initial": 24576, "incremental": 0 },
+        "heap": { "initial": 2560, "incremental": 0 },
+        "stack": 384
+    },
     "modules": {
         "*": "./main.js"
     },
