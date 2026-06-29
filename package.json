@@ -196,6 +196,204 @@
                     "type": "raw"
                 },
                 {
+                    "file": "data/GreenYoshiHead-U.pdc",
+                    "name": "YOSHI_GREEN_0",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/GreenYoshiHead-UR.pdc",
+                    "name": "YOSHI_GREEN_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/GreenYoshiHead-R.pdc",
+                    "name": "YOSHI_GREEN_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/GreenYoshiHead-DR.pdc",
+                    "name": "YOSHI_GREEN_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/GreenYoshiHead-D.pdc",
+                    "name": "YOSHI_GREEN_4",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/GreenYoshiHead-DL.pdc",
+                    "name": "YOSHI_GREEN_5",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/GreenYoshiHead-L.pdc",
+                    "name": "YOSHI_GREEN_6",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/GreenYoshiHead-UL.pdc",
+                    "name": "YOSHI_GREEN_7",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YoshiHead-U.pdc",
+                    "name": "YOSHI_LBLUE_0",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YoshiHead-UR.pdc",
+                    "name": "YOSHI_LBLUE_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YoshiHead-R.pdc",
+                    "name": "YOSHI_LBLUE_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YoshiHead-DR.pdc",
+                    "name": "YOSHI_LBLUE_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YoshiHead-D.pdc",
+                    "name": "YOSHI_LBLUE_4",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YoshiHead-DL.pdc",
+                    "name": "YOSHI_LBLUE_5",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YoshiHead-L.pdc",
+                    "name": "YOSHI_LBLUE_6",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YoshiHead-UL.pdc",
+                    "name": "YOSHI_LBLUE_7",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/RedYoshiHead-U.pdc",
+                    "name": "YOSHI_RED_0",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/RedYoshiHead-UR.pdc",
+                    "name": "YOSHI_RED_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/RedYoshiHead-R.pdc",
+                    "name": "YOSHI_RED_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/RedYoshiHead-DR.pdc",
+                    "name": "YOSHI_RED_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/RedYoshiHead-D.pdc",
+                    "name": "YOSHI_RED_4",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/RedYoshiHead-DL.pdc",
+                    "name": "YOSHI_RED_5",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/RedYoshiHead-L.pdc",
+                    "name": "YOSHI_RED_6",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/RedYoshiHead-UL.pdc",
+                    "name": "YOSHI_RED_7",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YellowYoshiHead-U.pdc",
+                    "name": "YOSHI_YELLOW_0",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YellowYoshiHead-UR.pdc",
+                    "name": "YOSHI_YELLOW_1",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YellowYoshiHead-R.pdc",
+                    "name": "YOSHI_YELLOW_2",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YellowYoshiHead-DR.pdc",
+                    "name": "YOSHI_YELLOW_3",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YellowYoshiHead-D.pdc",
+                    "name": "YOSHI_YELLOW_4",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YellowYoshiHead-DL.pdc",
+                    "name": "YOSHI_YELLOW_5",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YellowYoshiHead-L.pdc",
+                    "name": "YOSHI_YELLOW_6",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/YellowYoshiHead-UL.pdc",
+                    "name": "YOSHI_YELLOW_7",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
+                    "file": "data/Tongue.pdc",
+                    "name": "YOSHI_TONGUE",
+                    "targetPlatforms": null,
+                    "type": "raw"
+                },
+                {
                     "file": "images/icon.png",
                     "menuIcon": true,
                     "name": "icon",

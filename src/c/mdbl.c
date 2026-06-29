@@ -1,37 +1,33 @@
 #include <pebble.h>
 
 // Yoshi Flower is an Alloy (Moddable) watchface: all rendering and logic live
-// in the JS mod (src/embeddedjs/main.js). This C stub just opens a window and
-// starts the XS virtual machine that runs the mod.
+// in the JS mod (src/embeddedjs/main.js). This C stub opens a window and starts
+// the XS virtual machine that runs the mod.
 //
-// ── XS machine sizing — current firmware ──────────────────────
-// We deliberately do NOT hand-size the slot/chunk/stack pools here, because the
-// updated firmware can't apply them. moddable_createMachine() in PebbleOS
-// (src/fw/applib/moddable/moddable.c) has a variable-shadowing bug: when the
-// ModdableCreationRecord carries custom stack/slot/chunk, they are written into
-// a RE-DECLARED inner `creation` that goes out of scope and is discarded, so the
-// machine is always cloned from the DEFAULT creation. Proven on-device with the
-// instrumentation flag below: bumping .chunk from 14336 to 32768 left the logged
-// "Chunk available" byte-for-byte identical (5184). Custom pool sizes are a
-// no-op until that firmware bug is fixed. (Reported upstream.)
+// ── Blocked by a PebbleOS firmware bug — see KNOWN_ISSUES.md ───
+// On the post-update firmware the pool sizes below are IGNORED:
+// moddable_createMachine() (src/fw/applib/moddable/moddable.c) re-declares
+// `creation` inside its size-handling block (variable shadowing), so the custom
+// stack/slot/chunk are written to a discarded copy and the machine is always
+// built from the small DEFAULT pools (~8 KB chunk) -- too little for this face,
+// which then aborts at boot with "memory full". The manifest `creation` block
+// is ignored too. Confirmed on-device with XS instrumentation (changing .chunk
+// left the logged "Chunk available" unchanged). Nothing in this project can
+// grow the pool until that one-line firmware bug is fixed; once it is, the
+// sizes below apply and the face runs exactly as it did before the OS update.
 //
-// ── The lever we DO have: fxBuildFFI ──────────────────────────
-// moddable.c does:  modMachineAllowKernelHeap(NULL == fxBuildFFI);
-// so a NULL FFI hook lets the XS machine draw from the kernel heap instead of
-// being confined to the small app-RAM arena. The face has no FFI dependency --
-// it resolves resource ids at runtime by a viewbox fingerprint (see main.js),
-// and this firmware exposes no FFI/Natives anyway -- so the old resource-id FFI
-// hook was pure dead weight that ALSO denied the machine the kernel heap. Drop
-// it: fxBuildFFI = NULL. That, not pool sizing, is our real shot at fitting.
-//
-// flags = kModdableCreationFlagLogInstrumentation logs slot/chunk/stack via
-// app_log (only while a BT log listener is attached). Set .flags = 0 for the
-// final release build once the boot is confirmed.
+// fxBuildFFI is deliberately NULL: the face resolves resource ids at runtime by
+// a viewbox fingerprint (see main.js), not FFI, so the old resource-id hook was
+// unused -- and NULL lets the XS machine use the kernel heap
+// (moddable.c: modMachineAllowKernelHeap(NULL == fxBuildFFI)), which on-device
+// freed ~33 KB of app RAM. So when the pool bug is fixed these sizes draw from a
+// comfortable heap. (Set .flags = kModdableCreationFlagLogInstrumentation to log
+// slot/chunk/stack via app_log when diagnosing memory.)
 typedef struct {
   uint32_t recordSize;
-  uint32_t stack;   // bytes (0 = firmware default)
-  uint32_t slot;    // bytes (0 = firmware default)
-  uint32_t chunk;   // bytes (0 = firmware default)
+  uint32_t stack;   // bytes
+  uint32_t slot;    // bytes
+  uint32_t chunk;   // bytes
   uint32_t flags;
   void *fxBuildFFI;
 } MdblCreationRecord;
@@ -42,10 +38,11 @@ int main(void) {
 
   MdblCreationRecord cr = {
     .recordSize = sizeof(MdblCreationRecord),
-    .stack = 0, .slot = 0, .chunk = 0,   // defaults (custom sizes are ignored by
-                                         //   the firmware shadowing bug regardless)
-    .flags = kModdableCreationFlagLogInstrumentation,
-    .fxBuildFFI = NULL,                  // no FFI hook -> machine may use kernel heap
+    .stack = 6144,
+    .slot  = 40960,
+    .chunk = 24576,    // preload eats ~9 KB; this leaves ~15 KB for runtime
+    .flags = 0,        // instrumentation off for release
+    .fxBuildFFI = NULL,
   };
   moddable_createMachine((ModdableCreationRecord *)&cr);
 

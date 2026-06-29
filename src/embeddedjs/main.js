@@ -181,7 +181,7 @@ for (let c = 0; c < 4; c++)                                           // yoshi h
     for (let d = 0; d < 8; d++) FP[((145 + c) << 8) | (145 + d)] = R_YOSHI + c * 8 + d;  // w=145+color, h=145+dir
 FP[(25 << 8) | 152] = R_TONGUE;
 
-let RES = null, resReady = false, cacheHit = false;
+let RES = null, resReady = false;
 // Resident images, populated by initResident() once the ids are known.
 const petalFrames = [];
 let beeDCI = null, P_PX = [], P_PY = [], BEE_PX = 0, BEE_PY = 0;
@@ -206,35 +206,12 @@ function resOK(r) {
               f && f.width === 104 && f.height === 106);
 }
 
-// Shared chunk-pool GC nudge: overflow the pool with many tiny asks so the one
-// that can't fit triggers a collection that finalizes freed decodes' app-heap
-// data, then fits. Each ask alone is tiny, so none aborts. Used by both the
-// warm-cache load timer and the cold scan.
-const forceGC = () => { for (let i = 0; i < 20; i++) { try { new ArrayBuffer(1024); } catch(e) {} } };
-
-// Warm cache: the resource ids are already known. resOK() just decoded 3 images
-// to validate them; force-collect those NOW so they aren't still holding chunk
-// when the Application's display-list/pixel buffers allocate at module end. Then
-// DEFER the resident decode (petals + bee) into a fresh timer job (run after a
-// GC) so it never coincides with that buffer allocation -- this flattens the
-// load-time chunk peak the firmware update no longer leaves room for. Mirrors
-// the cold-scan tail; resReady flips true inside the deferred initResident().
 try {
     const c = JSON.parse(localStorage.getItem("resmap2"));
-    if (resOK(c)) {
-        RES = c;
-        cacheHit = true;
-        forceGC();                          // free resOK's transient decodes pre-Application
-        Timer.set(() => {
-            forceGC();
-            initResident();
-            loadFaceSet(petalCount());      // face set, now that ids are known
-            try { drawScreen(); } catch(e) {}
-        });
-    }
+    if (resOK(c)) { RES = c; initResident(); }
 } catch(e) {}
 
-if (!resReady && !cacheHit) {
+if (!resReady) {
     // Cold/stale cache: find each resource by fingerprint. Decoding all ~61 at
     // once OOMs, so SPREAD the scan across timer jobs (a few per job). Each image
     // decode is pinned until its job ends, so the PREVIOUS batch is collected at
@@ -243,7 +220,12 @@ if (!resReady && !cacheHit) {
     RES = new Array(R_LEN).fill(0);
     let scanId = 1;
     const SCAN_MAX = 62, SCAN_PER = 3;     // 1..62 are media (bitmaps load as null); MOD=63 skipped
-    // forceGC (module scope, above) is the chunk-pool GC nudge used below.
+    // Force a full GC: a single small alloc fits without pressuring the pool and
+    // frees nothing (that let decodes pile up and OOM). Overflow the chunk pool
+    // with many small asks -- the ask that can't fit triggers a GC that finalizes
+    // the freed decodes' app-heap data, then fits. Each ask alone is tiny, so
+    // none aborts (an over-pool single ask would).
+    const forceGC = () => { for (let i = 0; i < 20; i++) { try { new ArrayBuffer(1024); } catch(e) {} } };
     const scanStep = () => {
         forceGC();                          // collect the previous batch's decodes
         for (let n = 0; n < SCAN_PER && scanId <= SCAN_MAX; n++, scanId++) {
@@ -1163,16 +1145,7 @@ const FaceApplication = Application.template($ => ({
 }));
 
 export default new FaceApplication(null, {
-    // displayListLength and pixels both come out of the XS CHUNK pool, so they
-    // are trimmed to claw back boot-time chunk headroom after the firmware
-    // update tightened it (the watch now aborts at load with
-    // xsPlatform.c fxAbort "memory full"). displayList: the worst single
-    // begin/end is one dot-row band (~90 rects ~= 1.7KB; the count is bounded by
-    // the dot grid), so 2048 holds it -- and a display-list overflow is caught
-    // by drawScreen's try/catch (a skipped frame, repainted next tick, never a
-    // crash). pixels: Poco renders any region by striping it through this
-    // scanline buffer, so 2 rows are correct, just more passes per repaint.
-    displayListLength: 2048,    // was 4096
-    touchCount: 0,
-    pixels: screen.width * 2,   // was screen.width * 4
+    displayListLength: 4096,    // background draws per dot-row band, so the
+    touchCount: 0,              // worst begin/end is ~90 rects, not ~700
+    pixels: screen.width * 4,
 });
